@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MCPify — One command, four channels.</title>
+<meta name="description" content="既存アプリを1コマンドで OpenAPI + MCP Server + Claude Code Skill + CLI の4チャネルに展開する OSS。Turn any existing app into an AI-agent-ready surface in one command." />
+<meta property="og:title" content="MCPify — One command, four channels." />
+<meta property="og:description" content="既存アプリを1コマンドで AIエージェント対応の4チャネルに変換する OSS。" />
+<meta property="og:url" content="https://imai-design.github.io/mcpify/" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Crimson+Pro:ital,wght@1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #0A0908;
+    --vermillion: #E85D3A;
+    --gold: #C9A961;
+    --paper: #F4F1EA;
+    --paper-2: #ECE7DA;
+    --line: #2A2725;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Noto Serif JP", "Hiragino Mincho ProN", serif;
+    font-weight: 400;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--vermillion); text-decoration: none; border-bottom: 1px solid currentColor; }
+  a:hover { background: rgba(232,93,58,0.08); }
+  code, pre, .mono { font-family: "JetBrains Mono", monospace; }
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  /* HERO */
+  header.hero {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 80px 0 100px;
+    border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+  header.hero::after {
+    content: "";
+    position: absolute; left: 0; right: 0; bottom: -1px; height: 4px;
+    background: linear-gradient(90deg, transparent, var(--vermillion), var(--gold), transparent);
+  }
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.3em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  h1.title {
+    font-size: clamp(48px, 8vw, 96px);
+    font-weight: 900;
+    line-height: 1.05;
+    margin: 0 0 24px;
+    letter-spacing: -0.02em;
+  }
+  h1.title .accent { color: var(--vermillion); }
+  .lede {
+    font-family: "Crimson Pro", serif;
+    font-style: italic;
+    font-size: clamp(20px, 3vw, 28px);
+    color: var(--paper-2);
+    max-width: 720px;
+    margin: 0 0 32px;
+    line-height: 1.5;
+  }
+  .lede.jp { font-family: "Noto Serif JP", serif; font-style: normal; font-weight: 400; }
+  .cmd-row {
+    display: inline-block;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--vermillion);
+    padding: 16px 24px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 16px;
+    color: var(--paper);
+    margin: 0 0 24px;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .cmd-row .prompt { color: var(--gold); user-select: none; }
+  .ctas { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 24px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 14px 24px;
+    font-family: "JetBrains Mono", monospace; font-size: 14px;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--gold);
+    color: var(--ink);
+    background: var(--gold);
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+  .btn:hover { background: var(--vermillion); border-color: var(--vermillion); color: var(--paper); }
+  .btn.ghost { background: transparent; color: var(--paper); border-color: var(--paper-2); }
+  .btn.ghost:hover { background: var(--paper); color: var(--ink); }
+
+  /* SECTIONS */
+  section { padding: 80px 0; border-bottom: 1px solid rgba(0,0,0,0.08); }
+  h2 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 900;
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+  }
+  h2 .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px;
+    color: var(--vermillion);
+    display: block;
+    margin-bottom: 8px;
+    letter-spacing: 0.2em;
+  }
+  h2 + .sub {
+    font-family: "Crimson Pro", serif; font-style: italic;
+    color: #555;
+    margin: 0 0 40px;
+    font-size: 18px;
+  }
+
+  /* OUTPUT TREE */
+  .tree {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 32px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 14px;
+    line-height: 1.7;
+    overflow-x: auto;
+    border-left: 4px solid var(--gold);
+  }
+  .tree .dim { color: #8a8580; }
+  .tree .label { color: var(--gold); }
+  .tree .comment { color: var(--vermillion); }
+
+  /* 4-CHANNEL GRID */
+  .channels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-top: 32px;
+  }
+  .channel {
+    border: 1px solid var(--line);
+    background: var(--paper-2);
+    padding: 24px;
+    position: relative;
+  }
+  .channel .ch-num {
+    position: absolute; top: 16px; right: 16px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--vermillion);
+    letter-spacing: 0.2em;
+  }
+  .channel h3 {
+    font-size: 18px;
+    margin: 0 0 8px;
+    font-weight: 700;
+  }
+  .channel p {
+    font-size: 14px;
+    color: #4a4540;
+    line-height: 1.6;
+    margin: 0;
+  }
+  .channel code { font-size: 12px; background: rgba(0,0,0,0.06); padding: 1px 6px; border-radius: 2px; }
+
+  /* WHY (quotes) */
+  blockquote {
+    border-left: 3px solid var(--vermillion);
+    background: var(--paper-2);
+    margin: 24px 0;
+    padding: 20px 28px;
+    font-style: italic;
+    font-family: "Noto Serif JP", serif;
+    font-size: 17px;
+  }
+  blockquote cite {
+    display: block;
+    font-style: normal;
+    margin-top: 12px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13px;
+    color: #555;
+  }
+  blockquote cite a { color: var(--vermillion); border: none; text-decoration: underline; }
+
+  /* INSTALL */
+  pre.install {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 24px;
+    overflow-x: auto;
+    font-size: 14px;
+    border-left: 4px solid var(--gold);
+  }
+  pre.install .c { color: #8a8580; }
+  pre.install .y { color: var(--gold); }
+
+  /* ROADMAP */
+  ol.roadmap { list-style: none; padding: 0; counter-reset: rm; }
+  ol.roadmap li {
+    counter-increment: rm;
+    padding: 16px 0 16px 60px;
+    border-bottom: 1px dashed rgba(0,0,0,0.12);
+    position: relative;
+  }
+  ol.roadmap li::before {
+    content: "v" counter(rm, decimal-leading-zero);
+    position: absolute; left: 0; top: 16px;
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 600;
+    color: var(--vermillion);
+    font-size: 14px;
+    letter-spacing: 0.1em;
+  }
+  ol.roadmap li.done::before { color: var(--gold); }
+  ol.roadmap li.done strong::before { content: "✅ "; }
+
+  footer {
+    background: var(--ink);
+    color: var(--paper-2);
+    padding: 60px 0 40px;
+    font-size: 14px;
+  }
+  footer .container { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 24px; }
+  footer .seal {
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    padding: 8px 16px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.2em;
+  }
+  footer a { color: var(--gold); border-color: var(--gold); }
+
+  @media (max-width: 720px) {
+    header.hero { padding: 60px 0 80px; }
+    section { padding: 56px 0; }
+    .cmd-row { font-size: 13px; padding: 14px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="container">
+    <div class="eyebrow">OPEN SOURCE · MIT · 2026</div>
+    <h1 class="title">MCPify<br /><span class="accent">One command,<br />four channels.</span></h1>
+    <p class="lede">Turn any existing app into an OpenAPI spec, an MCP Server, a Claude Code Skill, and a CLI — all at once.</p>
+    <p class="lede jp">既存アプリを1コマンドで <strong>OpenAPI / MCP Server / Claude Code Skill / CLI</strong> の4チャネルに展開する OSS。</p>
+
+    <div class="cmd-row"><span class="prompt">$ </span>mcpify https://your-api.example.com/openapi.json</div>
+
+    <div class="ctas">
+      <a class="btn" href="https://github.com/imai-design/mcpify">View on GitHub →</a>
+      <a class="btn ghost" href="#install">Install</a>
+      <a class="btn ghost" href="#why">Why it matters</a>
+    </div>
+  </div>
+</header>
+
+<section id="output">
+  <div class="container">
+    <h2><span class="num">01 · WHAT YOU GET</span>1コマンドで4チャネルが生える</h2>
+    <p class="sub">From one OpenAPI document, MCPify materializes everything an AI agent needs to drive your app.</p>
+
+    <div class="tree">output/
+├── <span class="label">openapi.json</span>                 <span class="comment"># normalized OpenAPI 3.x spec</span>
+├── <span class="label">mcp_server/</span>
+│   ├── server.py                <span class="comment"># Python MCP server (FastMCP)</span>
+│   ├── requirements.txt
+│   ├── claude_desktop_config.example.json
+│   └── README.md
+├── <span class="label">skills/&lt;name&gt;/</span>
+│   └── SKILL.md                 <span class="comment"># operation guide in plain language</span>
+└── <span class="label">cli/</span>
+    ├── &lt;name&gt;.py              <span class="comment"># standalone CLI with subcommands per operation</span>
+    └── README.md</div>
+
+    <div class="channels">
+      <div class="channel"><span class="ch-num">01</span><h3>OpenAPI 3.x</h3><p>Normalized, ready to publish to your developer portal or import into Postman / Insomnia / API gateways.</p></div>
+      <div class="channel"><span class="ch-num">02</span><h3>MCP Server</h3><p>Python FastMCP server. Pop the snippet into <code>claude_desktop_config.json</code> and your app shows up as native tools in Claude.</p></div>
+      <div class="channel"><span class="ch-num">03</span><h3>Claude Code Skill</h3><p>A <code>SKILL.md</code> that lets non-engineers operate your API in plain language. No more "read the docs first."</p></div>
+      <div class="channel"><span class="ch-num">04</span><h3>CLI</h3><p>One Python file. Stdlib-only. Every operation becomes a subcommand. Pipe-friendly JSON output.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="container">
+    <h2><span class="num">02 · WHY</span>アプリの正面玄関は、もうAIエージェントだ</h2>
+    <p class="sub">Born from a public exchange on 2026-05-28 between two builders we trust.</p>
+
+    <blockquote>
+      なんでみんなアプリに行くんだ？ なぜエージェント向けAPIに行かないの？
+      <cite>— <a href="https://x.com/Siglume736">@Siglume736</a></cite>
+    </blockquote>
+
+    <blockquote>
+      API・MCP・Skills・CLI を全展開すれば、API docs を読まずに非エンジニアでもAIが操作できる。すでに僕のアプリで検証済みです。
+      <cite>— <a href="https://x.com/taiyo_ai_gakuse">@taiyo_ai_gakuse</a></cite>
+    </blockquote>
+
+    <p style="font-size:17px; max-width: 720px;">AI エージェントが新しい正面玄関になった世界では、アプリが <strong>認証付き MCP / OpenAPI / Skill / CLI</strong> を持っていないと、エージェントからは見えない透明なアプリ扱いになる。MCPify は、その装備を <em>既存アプリ</em> に1コマンドで後付けする道具。</p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="container">
+    <h2><span class="num">03 · INSTALL</span>5分で立ち上がる</h2>
+    <p class="sub">Requires Python 3.9+ — that's it. No external dependencies for MCPify itself.</p>
+
+<pre class="install"><span class="c"># clone and install</span>
+git clone https://github.com/imai-design/mcpify.git
+cd mcpify
+pip install -e .
+
+<span class="c"># run against any OpenAPI document</span>
+<span class="y">mcpify</span> https://petstore3.swagger.io/api/v3/openapi.json --name petstore
+
+<span class="c"># launch the generated MCP server</span>
+cd output/mcp_server
+pip install -r requirements.txt
+export MCPIFY_BASE_URL="https://your-api.example.com"
+export MCPIFY_AUTH_TOKEN="your-bearer-token"
+python server.py</pre>
+
+    <p style="margin-top: 24px;">Then drop the snippet from <code>claude_desktop_config.example.json</code> into <code>~/Library/Application Support/Claude/claude_desktop_config.json</code> and restart Claude Desktop.</p>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="container">
+    <h2><span class="num">04 · ROADMAP</span>4チャネルから、もう一段深く</h2>
+    <ol class="roadmap">
+      <li class="done"><strong>OpenAPI → 4 channels</strong> · 今ここ。OpenAPI 3.x JSON/YAML を入力に、4チャネル同時生成。</li>
+      <li><strong>Framework route detection</strong> · Next.js / Django / Rails / Laravel のルート定義を直接読んで MCP 化。</li>
+      <li><strong>Playwright recorder mode</strong> · ソースが無い相手のアプリでも、ブラウザ操作を録画して MCP ツールに変換。</li>
+      <li><strong>Gatekeeper</strong> · OAuth2 / cookie-session プロキシ層。レート制御・監査ログ標準装備。</li>
+      <li><strong>TypeScript MCP server</strong> · 出力先を Python から TS に切替可能なオプション。</li>
+    </ol>
+  </div>
+</section>
+
+<section id="ship">
+  <div class="container">
+    <h2><span class="num">05 · SHIP</span>御主君のアプリも、4チャネル展開を標準に</h2>
+    <p style="font-size: 17px; max-width: 720px;">MCPify は無料の MIT ライセンスで配布されています。商用利用、改変、再配布いずれも自由。エージェント時代の標準装備を、今日からどうぞ。</p>
+    <div class="ctas">
+      <a class="btn" href="https://github.com/imai-design/mcpify">⭐ Star on GitHub</a>
+      <a class="btn ghost" href="https://github.com/imai-design/mcpify/issues" style="color: var(--ink); border-color: var(--ink);">Issues / Feature requests</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div>
+      <strong style="color: var(--paper);">MCPify</strong> · One command, four channels.<br />
+      MIT License · Built with care by Claude as the King's loyal retainer.
+    </div>
+    <div class="seal">RYOSEIWORLD合同会社 · 2026</div>
+  </div>
+</footer>
+
+</body>
+</html>

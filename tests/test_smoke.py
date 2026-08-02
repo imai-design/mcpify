@@ -192,6 +192,62 @@ def test_cli_reports_http_errors_readably(tmp_path):
     assert "MCPIFY_API_KEY" in body  # the 401/403 hint names the way in
 
 
+def test_local_spec_urls_are_refused_by_default(tmp_path):
+    """A spec URL aimed at the local network should not be fetched silently."""
+    sys.path.insert(0, str(SRC))
+    from mcpify import openapi
+
+    for url in ["http://127.0.0.1:1/spec.json",
+                "http://169.254.169.254/latest/meta-data/",
+                "http://10.0.0.5/internal.json"]:
+        try:
+            openapi.load(url)
+        except openapi.LocalAddressBlocked:
+            continue
+        raise AssertionError(f"not blocked: {url}")
+
+
+def test_allow_local_opts_back_in(tmp_path):
+    """Serving a spec from localhost is a normal thing to do while developing."""
+    sys.path.insert(0, str(SRC))
+    from mcpify import openapi
+
+    # allow_local skips the check, so the call gets far enough to fail on the
+    # connection instead of on the guard.
+    try:
+        openapi.load("http://127.0.0.1:1/spec.json", allow_local=True)
+    except openapi.LocalAddressBlocked:
+        raise AssertionError("--allow-local did not bypass the guard")
+    except Exception:
+        pass  # connection refused is the expected outcome here
+
+
+def test_redirect_into_local_network_is_refused(tmp_path):
+    """A public URL that redirects inward must be caught at the redirect."""
+    sys.path.insert(0, str(SRC))
+    from mcpify import openapi
+
+    handler = openapi._GuardedRedirectHandler()
+
+    class Req:
+        def get_full_url(self): return "https://example.com/spec.json"
+        def has_header(self, name): return False
+        def get_method(self): return "GET"
+        timeout = 30
+        headers: dict = {}
+        unredirected_hdrs: dict = {}
+        origin_req_host = "example.com"
+        unverifiable = False
+
+    try:
+        handler.redirect_request(Req(), None, 302, "Found", {},
+                                 "http://169.254.169.254/latest/meta-data/")
+    except openapi.LocalAddressBlocked:
+        pass
+    else:
+        raise AssertionError("redirect into link-local was allowed")
+
+
 def test_hostile_spec_cannot_inject_code(tmp_path):
     """Spec values must land as inert string literals, never as expressions.
 

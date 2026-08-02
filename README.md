@@ -63,12 +63,14 @@ listed in its own `requirements.txt`.
 
 ```
 mcpify TARGET [--out PATH] [--name NAME] [--base-url URL] [--only CHANNEL]
+              [--allow-local]
 
   TARGET         OpenAPI document. URL (http/https) or local path (json/yaml).
   --out, -o      Output directory (default: ./output)
   --name, -n     Project slug (default: derived from OpenAPI title)
   --base-url     Override servers[0].url in generated code
   --only         One of: openapi | mcp | skill | cli | all (default: all)
+  --allow-local  Permit spec URLs on local/private networks (see below)
 ```
 
 ### Examples
@@ -157,6 +159,16 @@ arbitrary code. The regression tests for this live in `tests/test_smoke.py`.
 
 Generating from a spec never executes it, but do read what comes out before
 running it against anything that matters.
+
+Spec URLs on local or private networks — loopback, RFC 1918, link-local — are
+refused, including when a public URL redirects to one. This keeps a spec URL
+from being used to reach something only the machine running MCPify can see,
+such as `169.254.169.254`. Serving a spec from your own dev server is a normal
+thing to do, so pass `--allow-local` for that:
+
+```bash
+mcpify http://localhost:8000/openapi.json --allow-local --name myapp
+```
 
 ## Development
 

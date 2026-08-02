@@ -25,6 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
                    choices=["openapi", "mcp", "skill", "cli", "all"],
                    default="all",
                    help="Emit only the chosen channel (default: all)")
+    p.add_argument("--allow-local", action="store_true",
+                   help="Allow spec URLs on local/private networks (e.g. localhost dev servers)")
     p.add_argument("--version", action="version", version=f"mcpify {__version__}")
     return p
 
@@ -32,7 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list = None) -> int:
     args = build_parser().parse_args(argv)
 
-    raw = openapi.load(args.target)
+    try:
+        raw = openapi.load(args.target, allow_local=args.allow_local)
+    except openapi.LocalAddressBlocked as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
     spec = openapi.normalize(raw)
     if not spec.operations:
         print("ERROR: no operations found in the OpenAPI document.", file=sys.stderr)

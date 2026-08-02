@@ -1,5 +1,8 @@
+import ipaddress
 import json
 import os
+import socket
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,11 +47,56 @@ class Spec:
     raw: dict = field(default_factory=dict)
 
 
-def load(target: str) -> dict:
+class LocalAddressBlocked(RuntimeError):
+    """A spec URL resolved to an address on the machine's own networks."""
+
+
+def _resolved_addresses(host: str):
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return []  # unresolvable; let the request fail on its own terms
+    return [ipaddress.ip_address(i[4][0]) for i in infos]
+
+
+def _reject_internal(url: str) -> None:
+    """Refuse URLs that point back into the local or private networks.
+
+    Fetching a spec is a request made on the caller's behalf, so a URL like
+    http://169.254.169.254/... or http://10.0.0.5/ reaches things the caller
+    may not have meant to expose. Checked per hop, since a public URL can
+    redirect inward.
+    """
+    host = urllib.parse.urlparse(url).hostname
+    if not host:
+        return
+    for ip in _resolved_addresses(host):
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise LocalAddressBlocked(
+                f"{url} resolves to {ip}, which is on a local or private network. "
+                f"Pass --allow-local if that is what you meant "
+                f"(e.g. a spec served by your own dev server)."
+            )
+
+
+class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Apply the same check to every redirect target, not just the first URL."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _reject_internal(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def load(target: str, allow_local: bool = False) -> dict:
     """Fetch and parse an OpenAPI document from URL or filesystem path."""
     if target.startswith(("http://", "https://")):
+        opener = urllib.request.build_opener()
+        if not allow_local:
+            _reject_internal(target)
+            opener = urllib.request.build_opener(_GuardedRedirectHandler())
         req = urllib.request.Request(target, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with opener.open(req, timeout=30) as resp:
             data = resp.read()
     else:
         data = Path(target).expanduser().read_bytes()

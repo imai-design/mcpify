@@ -228,6 +228,43 @@
   ol.roadmap li.done::before { color: var(--gold); }
   ol.roadmap li.done strong::before { content: "✅ "; }
 
+  /* ---- 差し替え用スロット ----------------------------------------------
+     動画・記事リンクが用意できたら、それぞれの HTML コメントの指示どおりに
+     中身を入れ替える。空のままでも成立するように作ってある。 */
+  .slot {
+    border: 1px dashed var(--line); border-radius: 4px;
+    background: var(--paper-2);
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; color: #6B6560;
+  }
+  .slot-video { aspect-ratio: 16 / 9; max-width: 860px; }
+  .slot-video iframe { width: 100%; height: 100%; border: 0; border-radius: 4px; }
+  .slot-note { font-size: 14px; letter-spacing: .04em; padding: 24px; }
+  .link-grid {
+    display: grid; gap: 16px; margin-top: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .link-card {
+    border: 1px solid var(--line); border-radius: 4px; padding: 20px;
+    background: var(--paper-2); text-decoration: none; color: var(--ink);
+    display: block;
+  }
+  .link-card:hover { border-color: var(--vermillion); }
+  .link-card .kind {
+    font-size: 11px; letter-spacing: .12em; color: var(--vermillion);
+    display: block; margin-bottom: 8px;
+  }
+  .link-card strong { display: block; margin-bottom: 6px; }
+  .link-card span.desc { font-size: 14px; color: #4A4540; }
+  .safety-list { list-style: none; padding: 0; max-width: 760px; }
+  .safety-list li {
+    padding: 14px 0 14px 28px; border-bottom: 1px solid rgba(42,39,37,.12);
+    position: relative; font-size: 15px;
+  }
+  .safety-list li::before {
+    content: "✓"; position: absolute; left: 0; color: var(--gold); font-weight: 700;
+  }
+
   footer {
     background: var(--ink);
     color: var(--paper-2);
@@ -320,12 +357,12 @@
 <section id="install">
   <div class="container">
     <h2><span class="num">03 · INSTALL</span>5分で立ち上がる</h2>
-    <p class="sub">Requires Python 3.9+ — that's it. No external dependencies for MCPify itself.</p>
+    <p class="sub">Requires Python 3.9+. MCPify 本体と生成CLIは標準ライブラリだけで動く。YAML の仕様書を読むときだけ PyYAML が要る（公開APIはYAMLが多いので入れておくのが無難）。</p>
 
 <pre class="install"><span class="c"># clone and install</span>
 git clone https://github.com/imai-design/mcpify.git
 cd mcpify
-pip install -e .
+pip install -e <span class="y">".[yaml]"</span>
 
 <span class="c"># run against any OpenAPI document</span>
 <span class="y">mcpify</span> https://petstore3.swagger.io/api/v3/openapi.json --name petstore
@@ -341,9 +378,66 @@ python server.py</pre>
   </div>
 </section>
 
+<section id="demo">
+  <div class="container">
+    <h2><span class="num">04 · DEMO</span>動かしているところ</h2>
+    <p class="sub">仕様書を渡してから、生成されたCLIが実データを返すまで。</p>
+
+    <!-- ▼ 動画スロット
+         YouTube に上げたら、この div の中身をまるごと iframe に差し替える：
+         <iframe src="https://www.youtube.com/embed/【動画ID】"
+                 title="MCPify demo" allowfullscreen></iframe>
+         スタイル（16:9・角丸）は .slot-video 側に入っているので、
+         iframe には属性を足すだけでよい。 -->
+    <div class="slot slot-video">
+      <span class="slot-note">DEMO VIDEO<br />準備中</span>
+    </div>
+  </div>
+</section>
+
+<section id="safety">
+  <div class="container">
+    <h2><span class="num">05 · SAFETY</span>仕様書は「実行される入力」として扱う</h2>
+    <p class="sub">MCPify は仕様書からコードを作る。つまり仕様書は、そのまま実行されうる入力だ。</p>
+    <ul class="safety-list">
+      <li><strong>コード注入を塞いだ</strong> — 仕様書由来の値はすべてエスケープしてから生成コードに埋める。細工したパラメータ名で任意コードが走る余地を残さない。</li>
+      <li><strong>内部ネットワークへ行かない</strong> — 仕様書URLがループバック・プライベート・リンクローカルを指していたら拒否する。公開URLから内部へ転送する手口も各リダイレクトで検証。<code>--allow-local</code> で開発時は解除できる。</li>
+      <li><strong>失敗が読める</strong> — 通信に失敗したらAPIのエラー本文と、次にやること（どの環境変数を設定するか）を表示する。</li>
+      <li><strong>壊れていないことを毎回確かめている</strong> — Python 3.9 / 3.11 / 3.13 でテスト12件＋実APIでの疎通確認をCIで自動実行。</li>
+    </ul>
+  </div>
+</section>
+
+<section id="links">
+  <div class="container">
+    <h2><span class="num">06 · LINKS</span>もっと詳しく</h2>
+    <p class="sub">解説記事・関連リンク。</p>
+
+    <!-- ▼ リンクスロット
+         記事や紹介が増えたら .link-card を複製して追記する。
+         kind = 種別ラベル（ARTICLE / VIDEO / POST など）
+         href = リンク先。カードごと消しても崩れない。 -->
+    <div class="link-grid">
+      <a class="link-card" href="https://github.com/imai-design/mcpify">
+        <span class="kind">REPOSITORY</span>
+        <strong>GitHub — imai-design/mcpify</strong>
+        <span class="desc">ソース・Issue・リリース。MIT ライセンス。</span>
+      </a>
+      <a class="link-card" href="https://github.com/imai-design/mcpify/releases">
+        <span class="kind">RELEASES</span>
+        <strong>リリースノート</strong>
+        <span class="desc">各版で何が変わったか。</span>
+      </a>
+      <div class="slot">
+        <span class="slot-note">解説記事<br />準備中</span>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="roadmap">
   <div class="container">
-    <h2><span class="num">04 · ROADMAP</span>4チャネルから、もう一段深く</h2>
+    <h2><span class="num">07 · ROADMAP</span>4チャネルから、もう一段深く</h2>
     <ol class="roadmap">
       <li class="done"><strong>OpenAPI → 4 channels</strong> · 今ここ。OpenAPI 3.x JSON/YAML を入力に、4チャネル同時生成。</li>
       <li><strong>Framework route detection</strong> · Next.js / Django / Rails / Laravel のルート定義を直接読んで MCP 化。</li>
@@ -356,7 +450,7 @@ python server.py</pre>
 
 <section id="ship">
   <div class="container">
-    <h2><span class="num">05 · SHIP</span>御主君のアプリも、4チャネル展開を標準に</h2>
+    <h2><span class="num">08 · SHIP</span>あなたのアプリも、4チャネル展開を標準に</h2>
     <p style="font-size: 17px; max-width: 720px;">MCPify は無料の MIT ライセンスで配布されています。商用利用、改変、再配布いずれも自由。エージェント時代の標準装備を、今日からどうぞ。</p>
     <div class="ctas">
       <a class="btn" href="https://github.com/imai-design/mcpify">⭐ Star on GitHub</a>
@@ -369,7 +463,7 @@ python server.py</pre>
   <div class="container">
     <div>
       <strong style="color: var(--paper);">MCPify</strong> · One command, four channels.<br />
-      MIT License · Built with care by Claude as the King's loyal retainer.
+      MIT License · Built with Claude Code.
     </div>
     <div class="seal">RYOSEIWORLD合同会社 · 2026</div>
   </div>

@@ -61,12 +61,37 @@ def load(target: str) -> dict:
 def _parse_yaml(text: str) -> dict:
     try:
         import yaml  # type: ignore
-        return yaml.safe_load(text)
     except ImportError as e:
         raise RuntimeError(
             "YAML OpenAPI detected but PyYAML is not installed. "
             "Install with: pip install pyyaml"
         ) from e
+    return yaml.load(text, Loader=_spec_loader(yaml))
+
+
+def _spec_loader(yaml):
+    """A SafeLoader that leaves timestamps as strings.
+
+    YAML 1.1 resolves things like `2015-02-22T20:00:45Z` into datetime
+    objects. The document is written back out as JSON, and datetime is not
+    JSON-serializable, so a spec containing a single date would abort
+    generation. Everything else keeps its native type.
+    """
+    global _SPEC_LOADER
+    if _SPEC_LOADER is None:
+        class SpecLoader(yaml.SafeLoader):
+            pass
+
+        SpecLoader.yaml_implicit_resolvers = {
+            ch: [(tag, regexp) for tag, regexp in resolvers
+                 if tag != "tag:yaml.org,2002:timestamp"]
+            for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+        }
+        _SPEC_LOADER = SpecLoader
+    return _SPEC_LOADER
+
+
+_SPEC_LOADER = None
 
 
 def normalize(raw: dict) -> Spec:

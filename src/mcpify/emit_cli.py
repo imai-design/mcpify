@@ -20,6 +20,7 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
            "import os\n" \
            "import sys\n" \
            "import urllib.request\n" \
+           "import urllib.error\n" \
            "import urllib.parse\n\n" \
            f'BASE_URL = os.environ.get("MCPIFY_BASE_URL", {py_literal(effective_base)})\n' \
            'AUTH_HEADER_NAME = os.environ.get("MCPIFY_AUTH_HEADER", "Authorization")\n' \
@@ -48,8 +49,23 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
            "        data = json.dumps(body).encode('utf-8')\n" \
            "        headers['Content-Type'] = 'application/json'\n" \
            "    req = urllib.request.Request(url, data=data, headers=headers, method=method)\n" \
-           "    with urllib.request.urlopen(req, timeout=60) as r:\n" \
-           "        text = r.read().decode('utf-8') if r.length != 0 else ''\n" \
+           "    try:\n" \
+           "        with urllib.request.urlopen(req, timeout=60) as r:\n" \
+           "            text = r.read().decode('utf-8') if r.length != 0 else ''\n" \
+           "    except urllib.error.HTTPError as e:\n" \
+           "        detail = e.read().decode('utf-8', 'replace').strip()\n" \
+           "        sys.stderr.write(f'HTTP {e.code} {e.reason}  {method} {url}\\n')\n" \
+           "        if detail:\n" \
+           "            sys.stderr.write(detail[:800] + ('...' if len(detail) > 800 else '') + '\\n')\n" \
+           "        if e.code in (401, 403):\n" \
+           "            sys.stderr.write(\n" \
+           "                'Hint: this endpoint needs credentials. Set MCPIFY_AUTH_TOKEN for a\\n'\n" \
+           "                'bearer token, or MCPIFY_API_KEY if the API takes a key as a query\\n'\n" \
+           "                'parameter (Google APIs do; override the name with MCPIFY_API_KEY_PARAM).\\n')\n" \
+           "        raise SystemExit(1)\n" \
+           "    except urllib.error.URLError as e:\n" \
+           "        sys.stderr.write(f'Could not reach {url}: {e.reason}\\n')\n" \
+           "        raise SystemExit(1)\n" \
            "    try:\n" \
            "        return json.loads(text) if text else {'status': 'ok'}\n" \
            "    except json.JSONDecodeError:\n" \

@@ -25,6 +25,10 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+yaml = ["pyyaml>=5.1"]
+dev = ["pytest>=7.0", "pyyaml>=5.1"]
+
 [project.urls]
 Homepage = "https://github.com/imai-design/mcpify"
 Repository = "https://github.com/imai-design/mcpify"

@@ -49,6 +49,12 @@ Or run without installing:
 PYTHONPATH=src python3 -m mcpify <target>
 ```
 
+MCPify itself runs on the standard library. JSON specs need nothing else.
+**YAML specs need PyYAML** (`pip install pyyaml`) — many public specs are YAML,
+so install it unless you know yours are JSON. The generated CLI is also
+dependency-free; only the generated MCP server pulls in `mcp` and `httpx`,
+listed in its own `requirements.txt`.
+
 ## Usage
 
 ```
@@ -73,6 +79,24 @@ mcpify ./my-api.yaml --only mcp --name myapp
 # Override base URL (useful when the spec uses a relative servers[].url)
 mcpify ./spec.json --base-url https://prod.example.com --name myapp
 ```
+
+### End to end: YouTube Data API
+
+Real APIs are the point, so here is one from spec to live data. YouTube takes
+its key as a query parameter rather than a bearer token:
+
+```bash
+mcpify https://api.apis.guru/v2/specs/googleapis.com/youtube/v3/openapi.json \
+  --out output --name youtube        # 76 operations across 39 paths
+
+export MCPIFY_API_KEY="AIza..."      # from Google Cloud Console
+python3 output/cli/youtube.py youtube-search-list \
+  --part snippet --q "openapi" --max-results 3
+```
+
+Subcommand names come from the spec's `operationId`, kebab-cased —
+`search.list` becomes `youtube-search-list`. Run the CLI with `--help` to
+list every operation it generated.
 
 ## Running the generated MCP server
 
@@ -118,6 +142,24 @@ python3 out/cli/youtube.py youtube-search-list --part snippet --q "openapi"
 ```
 
 Full OAuth2 / cookie-session proxy is on the v0.2 roadmap.
+
+## A note on untrusted specs
+
+MCPify turns a spec into source code you then run, so a spec is executable
+input. Values taken from the document are escaped before they reach the
+generated file ([`utils.py_literal`](src/mcpify/utils.py)); a crafted
+parameter name could otherwise have broken out of a string literal and run
+arbitrary code. The regression tests for this live in `tests/test_smoke.py`.
+
+Generating from a spec never executes it, but do read what comes out before
+running it against anything that matters.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 ## Roadmap
 

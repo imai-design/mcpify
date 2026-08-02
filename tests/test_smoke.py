@@ -134,6 +134,64 @@ def test_hostile_spec_still_compiles(tmp_path):
         subprocess.run([sys.executable, "-m", "py_compile", str(f)], check=True)
 
 
+YAML_WITH_DATE = """\
+openapi: "3.0.0"
+info:
+  title: Dated API
+  version: "1.0.0"
+servers:
+  - url: https://example.com
+paths:
+  /items:
+    get:
+      operationId: listItems
+      summary: List items.
+components:
+  schemas:
+    Meta:
+      example:
+        added: 2015-02-22T20:00:45.000Z
+        count: 3
+        active: true
+"""
+
+
+def test_yaml_spec_with_timestamps(tmp_path):
+    """YAML 1.1 turns bare dates into datetime, which is not JSON-serializable.
+
+    A single date anywhere in the document used to abort generation while
+    writing openapi.json. Timestamps must survive as strings; other scalars
+    must keep their native types.
+    """
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        return  # PyYAML is optional; nothing to check without it
+
+    spec_path = tmp_path / "spec.yaml"
+    spec_path.write_text(YAML_WITH_DATE, encoding="utf-8")
+    out = tmp_path / "out"
+    subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "dated"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True, check=True,
+    )
+    written = json.loads((out / "openapi.json").read_text(encoding="utf-8"))
+    example = written["components"]["schemas"]["Meta"]["example"]
+    assert example["added"] == "2015-02-22T20:00:45.000Z"
+    assert example["count"] == 3
+    assert example["active"] is True
+
+
+def test_cli_reports_http_errors_readably(tmp_path):
+    """A failed call should explain itself, not dump a urllib traceback."""
+    out = run_mcpify(tmp_path)
+    body = (out / "cli" / "smoke.py").read_text(encoding="utf-8")
+    assert "urllib.error.HTTPError" in body
+    assert "MCPIFY_API_KEY" in body  # the 401/403 hint names the way in
+
+
 def test_hostile_spec_cannot_inject_code(tmp_path):
     """Spec values must land as inert string literals, never as expressions.
 

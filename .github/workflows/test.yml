@@ -1,0 +1,50 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Test
+        run: pytest -q
+
+  # The generated code is the actual product, so check it runs on a real spec
+  # rather than only on the fixture the unit tests use.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[yaml]"
+
+      - name: Generate from a live YAML spec
+        run: python -m mcpify https://api.apis.guru/v2/openapi.yaml --out ./out --name guru
+
+      - name: Generated CLI returns live data
+        run: |
+          python ./out/cli/guru.py get-metrics | tee /tmp/metrics.json
+          python -c "import json; d=json.load(open('/tmp/metrics.json')); assert d['numAPIs'] > 0, d"

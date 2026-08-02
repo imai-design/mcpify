@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from mcpify.openapi import Operation, Spec
+from mcpify.utils import py_literal
 
 
 def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str]) -> None:
@@ -29,7 +30,7 @@ def _render_server(spec: Spec, name: str, base_url: Optional[str]) -> str:
         "",
         f'mcp = FastMCP("{name}")',
         "",
-        f'BASE_URL = os.environ.get("MCPIFY_BASE_URL", "{effective_base}")',
+        f'BASE_URL = os.environ.get("MCPIFY_BASE_URL", {py_literal(effective_base)})',
         'AUTH_HEADER_NAME = os.environ.get("MCPIFY_AUTH_HEADER", "Authorization")',
         'AUTH_TOKEN = os.environ.get("MCPIFY_AUTH_TOKEN", "")',
         'USER_AGENT = os.environ.get("MCPIFY_USER_AGENT", "MCPify/0.1")',
@@ -96,25 +97,25 @@ def _render_tool(op: Operation) -> str:
 
     sig = ", ".join(args)
     desc = (op.summary or op.description or f"{op.method} {op.path}").splitlines()[0].strip()
-    desc = desc.replace('"""', "'''")
 
     path_params = [p for p in op.params if p.location == "path"]
     query_params = [p for p in op.params if p.location == "query"]
     header_params = [p for p in op.params if p.location == "header"]
 
-    path_dict = "{" + ", ".join(f'"{p.name}": {p.py_name}' for p in path_params) + "}" if path_params else "None"
-    query_dict = "{" + ", ".join(f'"{p.name}": {p.py_name}' for p in query_params) + "}" if query_params else "None"
-    header_dict = "{" + ", ".join(f'"{p.name}": {p.py_name}' for p in header_params) + "}" if header_params else "None"
+    path_dict = "{" + ", ".join(f'{py_literal(p.name)}: {p.py_name}' for p in path_params) + "}" if path_params else "None"
+    query_dict = "{" + ", ".join(f'{py_literal(p.name)}: {p.py_name}' for p in query_params) + "}" if query_params else "None"
+    header_dict = "{" + ", ".join(f'{py_literal(p.name)}: {p.py_name}' for p in header_params) + "}" if header_params else "None"
     body_expr = "body" if op.has_body else "None"
 
-    docstring = f'"""{desc}"""' if not arg_docs else f'"""{desc}\n\n    Args:\n' + "\n".join(arg_docs) + '\n    """'
+    doc_body = desc if not arg_docs else desc + "\n\n    Args:\n" + "\n".join(arg_docs)
+    docstring = py_literal(doc_body)
 
     return "\n".join([
         "@mcp.tool()",
         f"def {op.py_name}({sig}) -> Any:",
         f"    {docstring}",
         f"    return _request("
-        f'"{op.method}", "{op.path}", '
+        f'{py_literal(op.method)}, {py_literal(op.path)}, '
         f"path_params={path_dict}, query={query_dict}, headers={header_dict}, body={body_expr})",
     ])
 

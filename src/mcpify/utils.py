@@ -1,6 +1,18 @@
+import json
 import re
 
 _NON_ALNUM = re.compile(r"[^a-zA-Z0-9]+")
+
+
+def py_literal(s) -> str:
+    """Render a spec-derived value as a safe Python string literal.
+
+    Anything taken from an OpenAPI document — parameter names, paths, URLs,
+    descriptions — is untrusted input that ends up inside generated source.
+    Interpolating it raw allows a crafted spec to execute arbitrary code in
+    the generated client, so every such value must go through here.
+    """
+    return json.dumps("" if s is None else str(s))
 
 
 def to_snake(name: str) -> str:

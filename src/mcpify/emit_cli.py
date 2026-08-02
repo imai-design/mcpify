@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from mcpify.openapi import Spec
-from mcpify.utils import to_kebab
+from mcpify.utils import py_literal, to_kebab
 
 
 def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str]) -> None:
@@ -21,7 +21,7 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
            "import sys\n" \
            "import urllib.request\n" \
            "import urllib.parse\n\n" \
-           f'BASE_URL = os.environ.get("MCPIFY_BASE_URL", "{effective_base}")\n' \
+           f'BASE_URL = os.environ.get("MCPIFY_BASE_URL", {py_literal(effective_base)})\n' \
            'AUTH_HEADER_NAME = os.environ.get("MCPIFY_AUTH_HEADER", "Authorization")\n' \
            'AUTH_TOKEN = os.environ.get("MCPIFY_AUTH_TOKEN", "")\n' \
            'USER_AGENT = os.environ.get("MCPIFY_USER_AGENT", "MCPify/0.1")\n' \
@@ -64,23 +64,23 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
     handlers: list = []
     for op in spec.operations:
         cmd_name = to_kebab(op.py_name)
-        main_parts.append(f'    p = sub.add_parser("{cmd_name}", help={json_str(op.summary or op.method + " " + op.path)})\n')
+        main_parts.append(f'    p = sub.add_parser({py_literal(cmd_name)}, help={py_literal(op.summary or op.method + " " + op.path)})\n')
         for prm in op.params:
             arg_kwargs: list = []
             if not prm.required:
                 arg_kwargs.append("default=None")
-            arg_kwargs.append(f'help={json_str(prm.description or prm.location)}')
+            arg_kwargs.append(f'help={py_literal(prm.description or prm.location)}')
             opt_flag = f'"--{to_kebab(prm.py_name)}"'
             main_parts.append(f'    p.add_argument({opt_flag}, {"required=True, " if prm.required else ""}{", ".join(arg_kwargs)})\n')
         if op.has_body:
             main_parts.append(f'    p.add_argument("--body", {"required=True, " if op.body_required else ""}help="JSON body string or @file.json")\n')
-        main_parts.append(f'    p.set_defaults(_handler="{op.py_name}")\n')
+        main_parts.append(f'    p.set_defaults(_handler={py_literal(op.py_name)})\n')
 
         handler = [
             f"def _handle_{op.py_name}(ns):\n",
         ]
-        path_pairs = ", ".join(f'"{p.name}": ns.{p.py_name}' for p in op.params if p.location == "path")
-        query_pairs = ", ".join(f'"{p.name}": ns.{p.py_name}' for p in op.params if p.location == "query")
+        path_pairs = ", ".join(f'{py_literal(p.name)}: ns.{p.py_name}' for p in op.params if p.location == "path")
+        query_pairs = ", ".join(f'{py_literal(p.name)}: ns.{p.py_name}' for p in op.params if p.location == "query")
         handler.append(f"    path_params = {{{path_pairs}}}\n")
         handler.append(f"    query = {{{query_pairs}}}\n")
         if op.has_body:
@@ -91,7 +91,7 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
             handler.append("    body = json.loads(raw) if raw else None\n")
         else:
             handler.append("    body = None\n")
-        handler.append(f"    return _request('{op.method}', '{op.path}', path_params=path_params, query=query, body=body)\n\n")
+        handler.append(f"    return _request({py_literal(op.method)}, {py_literal(op.path)}, path_params=path_params, query=query, body=body)\n\n")
         handlers.append("".join(handler))
 
     main_parts.append("    args = parser.parse_args()\n")
@@ -103,11 +103,6 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
     main_parts.append("    main()\n")
 
     return head + "".join(handlers) + "".join(main_parts)
-
-
-def json_str(s: str) -> str:
-    import json as _j
-    return _j.dumps(s or "")
 
 
 def _render_readme(slug: str, base_url) -> str:

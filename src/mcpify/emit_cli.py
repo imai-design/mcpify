@@ -23,7 +23,8 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
            "import urllib.parse\n\n" \
            f'BASE_URL = os.environ.get("MCPIFY_BASE_URL", "{effective_base}")\n' \
            'AUTH_HEADER_NAME = os.environ.get("MCPIFY_AUTH_HEADER", "Authorization")\n' \
-           'AUTH_TOKEN = os.environ.get("MCPIFY_AUTH_TOKEN", "")\n\n' \
+           'AUTH_TOKEN = os.environ.get("MCPIFY_AUTH_TOKEN", "")\n' \
+           'USER_AGENT = os.environ.get("MCPIFY_USER_AGENT", "MCPify/0.1")\n\n' \
            "\n" \
            "def _request(method, path, path_params=None, query=None, body=None):\n" \
            "    url = BASE_URL.rstrip('/') + path\n" \
@@ -34,7 +35,7 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
            "        q = {k: v for k, v in query.items() if v is not None}\n" \
            "        if q:\n" \
            "            url = url + ('&' if '?' in url else '?') + urllib.parse.urlencode(q)\n" \
-           "    headers = {'Accept': 'application/json'}\n" \
+           "    headers = {'Accept': 'application/json', 'User-Agent': USER_AGENT}\n" \
            "    if AUTH_TOKEN:\n" \
            "        headers[AUTH_HEADER_NAME] = (\n" \
            "            AUTH_TOKEN if AUTH_TOKEN.lower().startswith('bearer ') else f'Bearer {AUTH_TOKEN}'\n" \

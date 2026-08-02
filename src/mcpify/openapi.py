@@ -1,4 +1,5 @@
 import json
+import os
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Any, Optional
 from mcpify.utils import py_identifier, schema_to_py_type
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
+USER_AGENT = os.environ.get("MCPIFY_USER_AGENT", "MCPify/0.1")
 
 
 @dataclass
@@ -45,7 +47,8 @@ class Spec:
 def load(target: str) -> dict:
     """Fetch and parse an OpenAPI document from URL or filesystem path."""
     if target.startswith(("http://", "https://")):
-        with urllib.request.urlopen(target, timeout=30) as resp:
+        req = urllib.request.Request(target, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as resp:
             data = resp.read()
     else:
         data = Path(target).expanduser().read_bytes()

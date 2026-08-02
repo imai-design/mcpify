@@ -68,3 +68,21 @@ def test_skill_describes_operations(tmp_path):
     assert "get_item" in body
     assert "create_item" in body
     assert "POST /items" in body
+
+
+def test_generated_clients_send_user_agent(tmp_path):
+    """Hosts reject the urllib default UA as bot traffic, so always identify."""
+    out = run_mcpify(tmp_path)
+    for f in [out / "mcp_server" / "server.py", out / "cli" / "smoke.py"]:
+        body = f.read_text(encoding="utf-8")
+        assert 'MCPIFY_USER_AGENT' in body
+        assert 'User-Agent' in body
+
+
+def test_generated_clients_support_query_api_key(tmp_path):
+    """Many APIs (YouTube, Maps) take the key as a query param, not a Bearer header."""
+    out = run_mcpify(tmp_path)
+    for f in [out / "mcp_server" / "server.py", out / "cli" / "smoke.py"]:
+        body = f.read_text(encoding="utf-8")
+        assert 'MCPIFY_API_KEY' in body
+        assert 'API_KEY_PARAM' in body

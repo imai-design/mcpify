@@ -24,17 +24,20 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
            f'BASE_URL = os.environ.get("MCPIFY_BASE_URL", "{effective_base}")\n' \
            'AUTH_HEADER_NAME = os.environ.get("MCPIFY_AUTH_HEADER", "Authorization")\n' \
            'AUTH_TOKEN = os.environ.get("MCPIFY_AUTH_TOKEN", "")\n' \
-           'USER_AGENT = os.environ.get("MCPIFY_USER_AGENT", "MCPify/0.1")\n\n' \
+           'USER_AGENT = os.environ.get("MCPIFY_USER_AGENT", "MCPify/0.1")\n' \
+           'API_KEY = os.environ.get("MCPIFY_API_KEY", "")\n' \
+           'API_KEY_PARAM = os.environ.get("MCPIFY_API_KEY_PARAM", "key")\n\n' \
            "\n" \
            "def _request(method, path, path_params=None, query=None, body=None):\n" \
            "    url = BASE_URL.rstrip('/') + path\n" \
            "    if path_params:\n" \
            "        for k, v in path_params.items():\n" \
            "            url = url.replace('{' + k + '}', urllib.parse.quote(str(v)))\n" \
-           "    if query:\n" \
-           "        q = {k: v for k, v in query.items() if v is not None}\n" \
-           "        if q:\n" \
-           "            url = url + ('&' if '?' in url else '?') + urllib.parse.urlencode(q)\n" \
+           "    q = {k: v for k, v in (query or {}).items() if v is not None}\n" \
+           "    if API_KEY:\n" \
+           "        q = {**q, API_KEY_PARAM: API_KEY}\n" \
+           "    if q:\n" \
+           "        url = url + ('&' if '?' in url else '?') + urllib.parse.urlencode(q)\n" \
            "    headers = {'Accept': 'application/json', 'User-Agent': USER_AGENT}\n" \
            "    if AUTH_TOKEN:\n" \
            "        headers[AUTH_HEADER_NAME] = (\n" \

@@ -102,9 +102,20 @@ The generated MCP server and CLI both honor:
 
 | Env var               | Purpose                                                   |
 |-----------------------|-----------------------------------------------------------|
-| `MCPIFY_BASE_URL`     | Override the base URL of the upstream API                 |
-| `MCPIFY_AUTH_HEADER`  | Header name (default `Authorization`)                     |
-| `MCPIFY_AUTH_TOKEN`   | Token; auto-prefixed with `Bearer ` if no prefix is given |
+| `MCPIFY_BASE_URL`      | Override the base URL of the upstream API                 |
+| `MCPIFY_AUTH_HEADER`   | Header name (default `Authorization`)                     |
+| `MCPIFY_AUTH_TOKEN`    | Token; auto-prefixed with `Bearer ` if no prefix is given |
+| `MCPIFY_API_KEY`       | API key sent as a query parameter                         |
+| `MCPIFY_API_KEY_PARAM` | Query parameter name for the key (default `key`)          |
+| `MCPIFY_USER_AGENT`    | User-Agent to identify with (default `MCPify/0.1`)        |
+
+Not every API takes a bearer token. Google APIs, for instance, expect the key
+as a query parameter — use `MCPIFY_API_KEY` for those:
+
+```bash
+export MCPIFY_API_KEY="AIza..."          # YouTube Data API, Maps, ...
+python3 out/cli/youtube.py youtube-search-list --part snippet --q "openapi"
+```
 
 Full OAuth2 / cookie-session proxy is on the v0.2 roadmap.
 

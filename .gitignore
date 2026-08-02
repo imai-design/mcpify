@@ -4,7 +4,7 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
-output/
+output*/
 dist/
 build/
 .pytest_cache/

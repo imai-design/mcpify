@@ -1,5 +1,9 @@
 # MCPify
 
+[![test](https://github.com/imai-design/mcpify/actions/workflows/test.yml/badge.svg)](https://github.com/imai-design/mcpify/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+
 > **One command, four channels.** Turn any existing app into an OpenAPI spec, an MCP Server, a Claude Code Skill, and a CLI — all at once.
 
 ```bash

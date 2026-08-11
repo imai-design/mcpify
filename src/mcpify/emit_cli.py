@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from mcpify.openapi import Spec
-from mcpify.utils import one_line, py_literal, to_kebab, write_generated
+from mcpify.utils import compile_check, one_line, py_literal, to_kebab, write_generated
 
 
 def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str], root: Path) -> None:
@@ -13,9 +13,10 @@ def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str], root: Pa
     out_dir.mkdir(parents=True, exist_ok=True)
     effective_base = base_url or spec.base_url or ""
     slug = to_kebab(name)
-    write_generated(
-        out_dir / f"{slug}.py", _render(spec, name, base_url), root, mode=0o755
-    )
+    cli_py = out_dir / f"{slug}.py"
+    cli_source = _render(spec, name, base_url)
+    compile_check(cli_source, cli_py)
+    write_generated(cli_py, cli_source, root, mode=0o755)
     write_generated(out_dir / "README.md", _render_readme(slug, effective_base), root)
 
 

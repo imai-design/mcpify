@@ -16,6 +16,7 @@ from mcpify.utils import py_identifier, schema_to_py_type
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 USER_AGENT = os.environ.get("MCPIFY_USER_AGENT", "MCPify/0.1")
 _BAD_PATH_CHARS = "@\\ \t\n\r"
+ALLOWED_SCHEMES = ("http", "https")
 
 # 小さな仕様書1枚でディスク満杯・OOM・無限ハングを起こせないための上限。
 MAX_SPEC_BYTES = int(os.environ.get("MCPIFY_MAX_SPEC_BYTES", 32 * 1024 * 1024))
@@ -165,9 +166,36 @@ def _read_capped(fp) -> bytes:
     return data
 
 
+def _reject_dup_keys(pairs):
+    """object_pairs_hook that turns a duplicate JSON key into a hard error.
+
+    A duplicate key parses fine and silently keeps the last value, which
+    lets an appended `"servers": [...]` near the end of a long document
+    override an innocuous one near the top without showing up in a diff.
+    """
+    seen: set = set()
+    obj: dict = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError(f"duplicate key {key!r} in JSON object")
+        seen.add(key)
+        obj[key] = value
+    return obj
+
+
 def load(target: str, allow_local: bool = False) -> dict:
     """Fetch and parse an OpenAPI document from URL or filesystem path."""
-    if target.startswith(("http://", "https://")):
+    parts = urllib.parse.urlsplit(target)
+    scheme = parts.scheme.lower()
+    # A Windows path like "C:\\spec.json" parses with a one-character
+    # "scheme"; only something with an actual netloc is treated as a URL, so
+    # drive letters and other scheme-shaped local paths still work.
+    is_url = len(scheme) > 1 and bool(parts.netloc)
+    if is_url and scheme not in ALLOWED_SCHEMES:
+        raise RuntimeError(
+            f"unsupported scheme {scheme!r}: only http/https URLs or local paths are accepted."
+        )
+    if is_url:
         if allow_local:
             opener = urllib.request.build_opener()
         else:
@@ -187,10 +215,23 @@ def load(target: str, allow_local: bool = False) -> dict:
             raise RuntimeError(f"{path} exceeds {MAX_SPEC_BYTES} bytes.")
         with open(path, "rb") as f:
             data = _read_capped(f)
+
+    text = data.decode("utf-8", errors="replace")
     try:
-        return json.loads(data)
-    except json.JSONDecodeError:
-        return _parse_yaml(data.decode("utf-8"))
+        return json.loads(text, object_pairs_hook=_reject_dup_keys)
+    except json.JSONDecodeError as je:
+        head = text.lstrip()[:200]
+        if head[:6].lower().startswith(("<!", "<html")):
+            raise RuntimeError(
+                f"{target} returned HTML, not an OpenAPI document "
+                f"(login page or bot check?): {head[:120]!r}"
+            ) from je
+        try:
+            return _parse_yaml(text)
+        except Exception as ye:
+            raise RuntimeError(f"{target} is neither JSON ({je}) nor YAML ({ye}).") from ye
+    except ValueError as ve:
+        raise RuntimeError(f"{target}: {ve}") from ve
 
 
 def dumps_capped(obj, max_bytes: int = None) -> str:
@@ -250,6 +291,19 @@ def _spec_loader(yaml):
                     )
                 return super().compose_node(parent, index)
 
+            def construct_mapping(self, node, deep=False):
+                # Same rationale as _reject_dup_keys: a duplicate key must be
+                # a hard error, not a silent last-value-wins.
+                seen: set = set()
+                for key_node, _value_node in node.value:
+                    key = self.construct_object(key_node, deep=deep)
+                    if key in seen:
+                        raise yaml.constructor.ConstructorError(
+                            None, None, f"duplicate key {key!r} in mapping", key_node.start_mark
+                        )
+                    seen.add(key)
+                return super().construct_mapping(node, deep=deep)
+
         SpecLoader.yaml_implicit_resolvers = {
             ch: [(tag, regexp) for tag, regexp in resolvers
                  if tag != "tag:yaml.org,2002:timestamp"]
@@ -262,15 +316,58 @@ def _spec_loader(yaml):
 _SPEC_LOADER = None
 
 
+def _unique(name: str, used: set, kind: str = "name") -> str:
+    """Disambiguate a name that has already been used in this generation run.
+
+    getUser / get_user / get-user all normalize to the same py_identifier;
+    without this the second definition silently shadows the first (Python's
+    "last def wins"), so the tool name ends up calling the wrong endpoint.
+    """
+    if name not in used:
+        used.add(name)
+        return name
+    i = 2
+    while f"{name}_{i}" in used:
+        i += 1
+    used.add(f"{name}_{i}")
+    print(f"warning: {kind} {name!r} collided; emitting as {name}_{i}", file=sys.stderr)
+    return f"{name}_{i}"
+
+
+def _deref(node, root, seen=()):
+    """Resolve a local ($/#) $ref chain against the document root.
+
+    Only local refs are supported (no remote/file refs: that would turn spec
+    loading into an open-ended fetcher). A ref that points at itself, directly
+    or through a chain, raises instead of looping forever.
+    """
+    while isinstance(node, dict) and "$ref" in node:
+        ref = node["$ref"]
+        if not isinstance(ref, str) or not ref.startswith("#/") or ref in seen:
+            raise ValueError(f"unsupported or circular $ref: {ref!r}")
+        seen = seen + (ref,)
+        cur = root
+        try:
+            for part in ref[2:].split("/"):
+                cur = cur[part.replace("~1", "/").replace("~0", "~")]
+        except (KeyError, TypeError, IndexError) as e:
+            raise ValueError(f"broken $ref: {ref!r}") from e
+        node = cur
+    return node
+
+
 def normalize(raw: dict) -> Spec:
-    info = raw.get("info") or {}
-    title = info.get("title") or "Untitled API"
-    version = info.get("version") or "0.0.0"
-    servers = raw.get("servers") or []
-    base_url = servers[0]["url"] if servers and isinstance(servers[0], dict) else ""
+    if not isinstance(raw, dict):
+        raise ValueError(f"OpenAPI document must be a mapping, got {type(raw).__name__}")
+    info = raw.get("info") if isinstance(raw.get("info"), dict) else {}
+    title = str(info.get("title") or "Untitled API")
+    version = str(info.get("version") or "0.0.0")
+    servers = raw.get("servers") if isinstance(raw.get("servers"), list) else []
+    base_url = str(servers[0].get("url") or "") if servers and isinstance(servers[0], dict) else ""
+    paths = raw.get("paths") if isinstance(raw.get("paths"), dict) else {}
 
     operations: list = []
-    paths = raw.get("paths") or {}
+    used_ops: set = set()
     for path, path_item in paths.items():
         if not isinstance(path_item, dict):
             continue
@@ -281,51 +378,73 @@ def normalize(raw: dict) -> Spec:
         if any(c in path for c in _BAD_PATH_CHARS):
             print(f"warning: skipping path key {path!r} (unsafe characters)", file=sys.stderr)
             continue
-        path_level_params = path_item.get("parameters") or []
+        path_level_params = path_item.get("parameters")
+        if not isinstance(path_level_params, list):
+            path_level_params = []
         for method in HTTP_METHODS:
             op = path_item.get(method)
             if not isinstance(op, dict):
                 continue
-            operations.append(_build_op(method, path, op, path_level_params))
+            operations.append(_build_op(method, path, op, path_level_params, raw, used_ops))
     return Spec(title=title, version=version, base_url=base_url,
                 operations=operations, raw=raw)
 
 
-def _build_op(method: str, path: str, op: dict, path_params: list) -> Operation:
+def _build_op(method: str, path: str, op: dict, path_params: list,
+              root: dict, used_ops: set) -> Operation:
     op_id = op.get("operationId") or f"{method}_{path}"
-    py_name = py_identifier(op_id)
+    py_name = _unique(py_identifier(op_id), used_ops, kind="operation")
 
     merged_params: list = []
     seen: set = set()
-    for p in list(path_params) + list(op.get("parameters") or []):
+    used_params: set = set()
+    raw_params = op.get("parameters")
+    if not isinstance(raw_params, list):
+        raw_params = []
+    for raw_p in list(path_params) + raw_params:
+        if not isinstance(raw_p, dict):
+            continue
+        p = _deref(raw_p, root)
         if not isinstance(p, dict):
             continue
-        key = (p.get("name"), p.get("in"))
+        name = p.get("name")
+        if not isinstance(name, str) or not name:
+            # Silently dropping an unnamed parameter used to make required
+            # path params (e.g. {id}) vanish from the generated signature
+            # while the literal "{id}" stayed in the URL template.
+            raise ValueError(f"parameter without a usable name in {method.upper()} {path}: {p!r}")
+        key = (name, p.get("in"))
         if key in seen:
             continue
         seen.add(key)
-        schema = p.get("schema") or {}
+        schema = p.get("schema") if isinstance(p.get("schema"), dict) else {}
         merged_params.append(Param(
-            name=p.get("name", "param"),
-            py_name=py_identifier(p.get("name", "param")),
+            name=name,
+            # user-id and user_id both normalize to user_id; colliding here
+            # would produce def op(user_id, user_id) -> SyntaxError.
+            py_name=_unique(py_identifier(name), used_params, kind="parameter"),
             location=p.get("in", "query"),
             py_type=schema_to_py_type(schema),
             required=bool(p.get("required") or p.get("in") == "path"),
-            description=p.get("description") or "",
+            description=str(p.get("description") or ""),
         ))
 
     request_body = op.get("requestBody")
     has_body = isinstance(request_body, dict) and bool(request_body.get("content"))
     body_required = has_body and bool(request_body.get("required"))
 
+    raw_tags = op.get("tags")
+    tags = ([str(t) for t in raw_tags if isinstance(t, (str, int, float))]
+            if isinstance(raw_tags, list) else [])
+
     return Operation(
         op_id=op_id,
         py_name=py_name,
         method=method.upper(),
         path=path,
-        summary=op.get("summary") or "",
-        description=op.get("description") or "",
-        tags=list(op.get("tags") or []),
+        summary=str(op.get("summary") or ""),
+        description=str(op.get("description") or ""),
+        tags=tags,
         params=merged_params,
         has_body=has_body,
         body_required=body_required,

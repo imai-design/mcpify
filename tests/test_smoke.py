@@ -650,6 +650,386 @@ def test_spec_server_mismatch_is_refused_unless_trusted(tmp_path):
         server.shutdown()
 
 
+COLLIDING_OPERATION_IDS = {
+    "openapi": "3.0.0",
+    "info": {"title": "Collision API", "version": "1.0.0"},
+    "servers": [{"url": "https://example.com"}],
+    "paths": {
+        "/user": {"get": {"operationId": "getUser", "summary": "Read your own profile."}},
+        "/admin/wipe": {"get": {"operationId": "get_user", "summary": "also get user"}},
+    },
+}
+
+
+def test_colliding_operation_ids_get_unique_names(tmp_path):
+    """getUser and get_user both normalize to get_user; the second must not
+    silently shadow the first (Python's last-def-wins), which used to make
+    the tool name get_user call /admin/wipe instead of /user.
+    """
+    spec_path = tmp_path / "collision.json"
+    spec_path.write_text(json.dumps(COLLIDING_OPERATION_IDS), encoding="utf-8")
+    out = tmp_path / "out"
+    subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "collision"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True, check=True,
+    )
+    body = (out / "mcp_server" / "server.py").read_text(encoding="utf-8")
+    assert body.count("def get_user(") == 1
+    assert "def get_user_2(" in body
+    assert '"/admin/wipe"' in body  # still reachable, under its own name
+
+
+RESERVED_KEYWORD_PARAM = {
+    "openapi": "3.0.0",
+    "info": {"title": "Keyword API", "version": "1.0.0"},
+    "servers": [{"url": "https://example.com"}],
+    "paths": {
+        "/search": {
+            "get": {
+                "operationId": "search",
+                "summary": "Search.",
+                "parameters": [
+                    {"name": "from", "in": "query", "required": False,
+                     "schema": {"type": "string"}}
+                ],
+            }
+        }
+    },
+}
+
+
+def test_reserved_keyword_param_name_compiles(tmp_path):
+    """A parameter literally named `from` must not become `def search(from: ...)`."""
+    spec_path = tmp_path / "keyword.json"
+    spec_path.write_text(json.dumps(RESERVED_KEYWORD_PARAM), encoding="utf-8")
+    out = tmp_path / "out"
+    subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "keyword"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True, check=True,
+    )
+    for f in [out / "mcp_server" / "server.py", out / "cli" / "keyword.py"]:
+        subprocess.run([sys.executable, "-m", "py_compile", str(f)], check=True)
+
+
+REF_PARAM_SPEC = {
+    "openapi": "3.0.0",
+    "info": {"title": "Ref API", "version": "1.0.0"},
+    "servers": [{"url": "https://example.com"}],
+    "paths": {
+        "/users/{id}": {
+            "get": {
+                "operationId": "getUserById",
+                "summary": "Get a user by id.",
+                "parameters": [{"$ref": "#/components/parameters/Id"}],
+            }
+        }
+    },
+    "components": {
+        "parameters": {
+            "Id": {"name": "id", "in": "path", "required": True,
+                   "schema": {"type": "string"}}
+        }
+    },
+}
+
+
+def test_ref_parameter_is_resolved(tmp_path):
+    """A $ref parameter must resolve to its real name, not vanish and drop
+    the required path param out of the generated signature.
+    """
+    spec_path = tmp_path / "ref.json"
+    spec_path.write_text(json.dumps(REF_PARAM_SPEC), encoding="utf-8")
+    out = tmp_path / "out"
+    subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "refspec"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True, check=True,
+    )
+    body = (out / "mcp_server" / "server.py").read_text(encoding="utf-8")
+    assert "def get_user_by_id(id: str)" in body
+    assert '{"id": id}' in body
+
+
+YAML_NUMERIC_SUMMARY = """\
+openapi: "3.0.0"
+info:
+  title: Numeric Summary API
+  version: "1.0.0"
+servers:
+  - url: https://example.com
+paths:
+  /items:
+    get:
+      operationId: listItems
+      summary: 20260811
+"""
+
+
+def test_numeric_summary_does_not_crash(tmp_path):
+    """A YAML summary that parses as an int must not crash the docstring
+    renderer, which used to call .splitlines() on it unconditionally.
+    """
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        return  # PyYAML is optional; nothing to check without it
+
+    spec_path = tmp_path / "numeric-summary.yaml"
+    spec_path.write_text(YAML_NUMERIC_SUMMARY, encoding="utf-8")
+    out = tmp_path / "out"
+    result = subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "numsum"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    body = (out / "mcp_server" / "server.py").read_text(encoding="utf-8")
+    assert "20260811" in body
+
+
+BODY_NAME_COLLISION = {
+    "openapi": "3.0.0",
+    "info": {"title": "Body Collision", "version": "1.0.0"},
+    "servers": [{"url": "https://example.com"}],
+    "paths": {
+        "/x": {
+            "post": {
+                "operationId": "createX",
+                "summary": "Create X",
+                "parameters": [
+                    {"name": "body", "in": "query", "required": False,
+                     "schema": {"type": "string"}}
+                ],
+                "requestBody": {
+                    "required": True,
+                    "content": {"application/json": {"schema": {"type": "object"}}},
+                },
+            }
+        }
+    },
+}
+
+
+def test_broken_generated_code_is_refused_not_written(tmp_path):
+    """A spec whose own `body` query param collides with the synthetic
+    `body: dict` argument produces a duplicate-argument function. That must
+    fail generation cleanly (ERROR, exit 2, nothing written), not leave a
+    server.py on disk that only breaks once someone tries to import it.
+    """
+    spec_path = tmp_path / "body-collision.json"
+    spec_path.write_text(json.dumps(BODY_NAME_COLLISION), encoding="utf-8")
+    out = tmp_path / "out"
+    result = subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "bodycollision"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert result.stderr.startswith("ERROR:")
+    assert not (out / "mcp_server" / "server.py").exists()
+
+
+def test_duplicate_json_keys_are_refused(tmp_path):
+    """A duplicate top-level JSON key must be refused, not silently resolved
+    to whichever value happens to parse last (e.g. a second `servers` key
+    appended at the end of a long document, invisible in a quick diff).
+    """
+    spec_path = tmp_path / "dup.json"
+    spec_path.write_text(
+        '{"openapi": "3.0.0", "info": {"title": "Dup", "version": "1"}, '
+        '"servers": [{"url": "https://good.example"}], '
+        '"servers": [{"url": "https://evil.example"}], '
+        '"paths": {"/x": {"get": {"operationId": "x", "summary": "s"}}}}',
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "dup"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2
+    assert result.stderr.startswith("ERROR:")
+
+
+def test_duplicate_yaml_keys_are_refused(tmp_path):
+    """Same as above, for the YAML loader."""
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        return  # PyYAML is optional; nothing to check without it
+
+    spec_path = tmp_path / "dup.yaml"
+    spec_path.write_text(
+        "openapi: \"3.0.0\"\n"
+        "info:\n  title: Dup\n  version: \"1\"\n"
+        "servers:\n  - url: https://good.example\n"
+        "servers:\n  - url: https://evil.example\n"
+        "paths:\n  /x:\n    get:\n      operationId: x\n      summary: s\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+    result = subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "dupyaml"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2
+    assert result.stderr.startswith("ERROR:")
+
+
+def test_html_response_is_diagnosed_not_misparsed(tmp_path):
+    """A spec URL that returns an HTML login/bot-check page must say so, not
+    fail with an unrelated PyYAML-install hint or AttributeError.
+    """
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"<html><body>Please sign in</body></html>")
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        target = f"http://127.0.0.1:{server.server_port}/spec.json"
+        result = subprocess.run(
+            [sys.executable, "-m", "mcpify", target, "--out", str(tmp_path / "out"),
+             "--name", "html", "--allow-local"],
+            env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 2
+        assert "HTML" in result.stderr
+    finally:
+        server.shutdown()
+
+
+def test_uppercase_scheme_is_treated_as_a_url(tmp_path):
+    """HTTPS://... must be treated as a URL (schemes are case-insensitive
+    per RFC 3986), not as a literal local filename.
+    """
+    sys.path.insert(0, str(SRC))
+    from mcpify import openapi
+
+    try:
+        openapi.load("HTTPS://127.0.0.1:1/spec.json")
+    except openapi.LocalAddressBlocked:
+        pass  # reached the local-network guard, so it was treated as a URL
+    except FileNotFoundError:
+        raise AssertionError("uppercase scheme was treated as a local path")
+
+
+def test_unsupported_scheme_is_refused(tmp_path):
+    """A scheme other than http/https (e.g. ftp://) must be refused, not
+    fall through to being read as a local path.
+    """
+    sys.path.insert(0, str(SRC))
+    from mcpify import openapi
+
+    try:
+        openapi.load("ftp://example.com/spec.json")
+    except RuntimeError as e:
+        assert "unsupported scheme" in str(e)
+    else:
+        raise AssertionError("ftp:// scheme was not refused")
+
+
+def _mcpify(spec_path, out, *extra):
+    return subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "smoke", *extra],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True,
+    )
+
+
+def test_regenerating_into_our_own_output_needs_no_force(tmp_path):
+    """Running again into the same --out is the normal way to use a generator.
+
+    Our own previous output is ours to replace; demanding --force for that
+    would break every regenerate-in-place script and CI job.
+    """
+    out = run_mcpify(tmp_path)
+    again = _mcpify(tmp_path / "spec.json", out)
+    assert again.returncode == 0, again.stderr
+
+
+def test_foreign_file_in_output_is_not_clobbered(tmp_path):
+    """A file we did not write must survive, even when its name collides.
+
+    This is the real hazard of pointing --out at "." or "~": something there
+    already answers to README.md and it is not ours.
+    """
+    out = tmp_path / "out"
+    (out / "cli").mkdir(parents=True)
+    victim = out / "cli" / "README.md"
+    victim.write_text("MY REAL README", encoding="utf-8")
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+
+    blocked = _mcpify(spec_path, out)
+    assert blocked.returncode == 2, blocked.stdout
+    assert "not written by mcpify" in blocked.stderr
+    assert victim.read_text(encoding="utf-8") == "MY REAL README"
+
+    forced = _mcpify(spec_path, out, "--force")
+    assert forced.returncode == 0, forced.stderr
+    assert victim.read_text(encoding="utf-8") != "MY REAL README"
+
+
+def test_force_does_not_delete_unrelated_files(tmp_path):
+    """--force replaces the files we generate, not the directories holding them.
+
+    Clearing a directory to make room would destroy files this run knows
+    nothing about — more damage than the overwrite the guard exists to stop.
+    """
+    out = run_mcpify(tmp_path)
+    bystander = out / "mcp_server" / "my-notes.txt"
+    bystander.write_text("MY NOTES", encoding="utf-8")
+
+    forced = _mcpify(tmp_path / "spec.json", out, "--force")
+    assert forced.returncode == 0, forced.stderr
+    assert bystander.read_text(encoding="utf-8") == "MY NOTES"
+
+
+def test_staging_lives_inside_out_not_its_parent(tmp_path):
+    """The scratch directory must sit inside --out, not --out's parent.
+
+    --out itself is known-writable (mcpify just created it); its parent may
+    not be, e.g. when --out points into a directory the caller does not own.
+    """
+    parent = tmp_path / "readonly-parent"
+    out = parent / "out"
+    out.mkdir(parents=True)
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+
+    os.chmod(parent, 0o555)
+    try:
+        result = _mcpify(spec_path, out)
+        assert result.returncode == 0, result.stderr
+        assert (out / "mcp_server" / "server.py").is_file()
+    finally:
+        os.chmod(parent, 0o755)
+
+
 def test_tool_param_docstring_cannot_open_heading(tmp_path):
     """A crafted parameter description must not break out onto its own line.
 

@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.3 — 2026-08-12
+
+Robustness. The previous two releases stopped a hostile spec from doing harm;
+this one stops an ordinary spec from producing quietly broken output.
+
+### Fixed
+
+- **Generated code is verified before it is written.** Every `.py` channel is
+  compiled in memory first, so a spec that would produce invalid Python fails
+  the run instead of leaving a file that only breaks when you try to use it.
+- **Colliding operation and parameter names are made unique.** `getUser` and
+  `get_user` both normalize to `get_user`; previously the second silently won,
+  so a tool named `get_user` could call an entirely different endpoint. Names
+  are now uniquified once, and all four channels agree on them.
+- **Reserved words and awkward names no longer break generation.** A parameter
+  named `from`, or one that normalizes to nothing (e.g. non-Latin names), used
+  to produce a `SyntaxError` or a duplicate argument.
+- **Local `$ref` parameters are resolved.** They were passed through unresolved,
+  which dropped required path parameters and left `{id}` literal in the URL.
+- **OpenAPI 3.1 type arrays** (`"type": ["string", "null"]`) are understood.
+- **Non-string scalars are coerced at the boundary**, so a YAML `summary` that
+  parses as a number no longer aborts the run.
+- **Duplicate keys are rejected** in both JSON and YAML. A `servers:` appended
+  at the end of a long document used to silently override the real one.
+- **An HTML response is diagnosed as such** — a login page or bot check no
+  longer surfaces as a confusing YAML or Unicode error.
+- **Scheme handling is correct**: `HTTPS://` (uppercase) is a URL, unsupported
+  schemes are rejected by name, and Windows drive letters stay local paths.
+
+### Changed
+
+- Output is generated into a scratch directory and moved into place only once
+  every channel has succeeded, so a failure cannot leave a half-updated tree.
+- MCPify now records what it wrote in `.mcpify-manifest.json`. Regenerating
+  into the same `--out` works exactly as before; a colliding file that MCPify
+  did not write is refused instead, and `--force` overrides that. Files MCPify
+  does not manage are never removed, and a symlink is never written through —
+  `--force` included.
+
 ## 0.1.2 — 2026-08-12
 
 ### Security

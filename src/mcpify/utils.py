@@ -1,4 +1,6 @@
+import hashlib
 import json
+import keyword
 import os
 import re
 from pathlib import Path
@@ -49,9 +51,21 @@ def to_kebab(name: str) -> str:
 
 
 def py_identifier(name: str) -> str:
+    """Turn a spec-derived name into a safe Python identifier.
+
+    to_snake() already falls back to "op" when nothing alnum survives, but
+    that means every such name collapses onto the same identifier ("---" and
+    "" and "!!!" all become "op"); hash the original so they stay distinct.
+    Reserved words (`from`, `import`, `match`, ...) are also not valid
+    parameter/function names, so those get a trailing underscore.
+    """
     ident = to_snake(name)
+    if not ident or ident == "op":
+        ident = "p_" + hashlib.sha1(str(name).encode("utf-8")).hexdigest()[:8]
     if ident[:1].isdigit():
         ident = f"op_{ident}"
+    if keyword.iskeyword(ident) or keyword.issoftkeyword(ident):
+        ident = ident + "_"
     return ident
 
 
@@ -69,11 +83,31 @@ def schema_to_py_type(schema: dict) -> str:
     if not isinstance(schema, dict):
         return "str"
     t = schema.get("type")
-    if t in OPENAPI_TO_PY_TYPE:
+    if isinstance(t, list):
+        # OpenAPI 3.1 allows {"type": ["string", "null"]}; a bare list is not
+        # a valid dict key for OPENAPI_TO_PY_TYPE, so pick the non-null entry.
+        t = next((x for x in t if x != "null"), None)
+    if isinstance(t, str) and t in OPENAPI_TO_PY_TYPE:
         return OPENAPI_TO_PY_TYPE[t]
     if "$ref" in schema or "oneOf" in schema or "anyOf" in schema:
         return "dict"
     return "str"
+
+
+def compile_check(source: str, path) -> None:
+    """Refuse to write generated Python that would not even parse.
+
+    A reserved keyword slipping through as an identifier, a duplicate
+    argument, or any other malformed name must fail generation loudly here
+    instead of leaving a broken file on disk that only breaks once someone
+    tries to run it.
+    """
+    try:
+        compile(source, str(path), "exec")
+    except SyntaxError as e:
+        raise RuntimeError(
+            f"refusing to write {path}: generated code is not valid Python ({e})"
+        ) from e
 
 
 def write_generated(path: Path, text: str, root: Path, mode: int = 0o644) -> None:

@@ -63,7 +63,7 @@ listed in its own `requirements.txt`.
 
 ```
 mcpify TARGET [--out PATH] [--name NAME] [--base-url URL] [--only CHANNEL]
-              [--allow-local] [--trust-spec-server]
+              [--allow-local] [--trust-spec-server] [--force]
 
   TARGET               OpenAPI document. URL (http/https) or local path (json/yaml).
   --out, -o            Output directory (default: ./output)
@@ -73,7 +73,19 @@ mcpify TARGET [--out PATH] [--name NAME] [--base-url URL] [--only CHANNEL]
   --allow-local        Permit spec URLs on local/private networks (see below)
   --trust-spec-server  Trust servers[0].url even when its host differs from
                         the spec's own host (see "A note on untrusted specs")
+  --force              Replace files in the output directory that MCPify did
+                        not write (see "Regenerating")
 ```
+
+### Regenerating
+
+Running again into the same `--out` replaces MCPify's own output and needs no
+extra flags. MCPify tracks what it wrote in `.mcpify-manifest.json`, so if a
+file it did not write is sitting at one of those paths — the usual way to
+discover you meant `--out ./output` rather than `--out .` — it stops and lists
+them instead of overwriting. Pass `--force` when replacing them is what you
+want. Files MCPify does not manage are left alone either way, and a symlink is
+never written through, `--force` included.
 
 ### Examples
 

@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional
 
 from mcpify.openapi import Operation, Spec
-from mcpify.utils import one_line, py_literal, write_generated
+from mcpify.utils import compile_check, one_line, py_literal, write_generated
 
 
 def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str], root: Path) -> None:
@@ -13,7 +13,9 @@ def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str], root: Pa
     out_dir.mkdir(parents=True, exist_ok=True)
     effective_base = base_url or spec.base_url or ""
     server_py = out_dir / "server.py"
-    write_generated(server_py, _render_server(spec, name, base_url), root)
+    server_source = _render_server(spec, name, base_url)
+    compile_check(server_source, server_py)
+    write_generated(server_py, server_source, root)
     write_generated(
         out_dir / "requirements.txt", "mcp[cli]>=1.0.0,<2\nhttpx>=0.27.0\n", root
     )

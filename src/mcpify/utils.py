@@ -2,6 +2,7 @@ import json
 import re
 
 _NON_ALNUM = re.compile(r"[^a-zA-Z0-9]+")
+_MD_CONTROL = re.compile(r"[\r\x00-\x08\x0b\x0c\x1b\u200b-\u200f\u2028\u2029]")
 
 
 def py_literal(s) -> str:
@@ -13,6 +14,26 @@ def py_literal(s) -> str:
     the generated client, so every such value must go through here.
     """
     return json.dumps("" if s is None else str(s))
+
+
+def one_line(s, max_len: int = 400) -> str:
+    """仕様書由来のテキストを1行の無害な文字列に潰す。
+
+    仕様書は untrusted input で、その値はエージェントが従う文書に入る。
+    見出し・水平線・コードフェンスを開けないよう改行と制御文字を落とす。
+    """
+    s = _MD_CONTROL.sub("", "" if s is None else str(s))
+    s = " ".join(s.split()).replace("`", "'")
+    return (s[:max_len] + "…") if len(s) > max_len else s
+
+
+def yaml_scalar(s) -> str:
+    """仕様書由来の値を YAML の二重引用符スカラーとして安全に出す。
+
+    YAML 1.2 の二重引用符スカラーは JSON 文字列の上位互換なので、
+    json.dumps のエスケープがそのまま使える（PyYAML 非依存を維持）。
+    """
+    return json.dumps(one_line(s), ensure_ascii=False)
 
 
 def to_snake(name: str) -> str:

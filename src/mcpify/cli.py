@@ -1,10 +1,14 @@
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 from mcpify import __version__
 from mcpify import openapi, emit_mcp, emit_skill, emit_cli
+from mcpify.utils import to_kebab
+
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,7 +48,11 @@ def main(argv: list = None) -> int:
         print("ERROR: no operations found in the OpenAPI document.", file=sys.stderr)
         return 2
 
-    name = args.name or _slugify(spec.title)
+    name = to_kebab(args.name) if args.name else _slugify(spec.title)
+    if not _SLUG_RE.match(name):
+        print(f"ERROR: --name must be a slug like 'petstore' (got {args.name!r})",
+              file=sys.stderr)
+        return 2
     out = Path(args.out).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
 
@@ -64,10 +72,12 @@ def main(argv: list = None) -> int:
     if "cli" in channels:
         emit_cli.emit(spec, out / "cli", name=name, base_url=args.base_url)
 
+    effective_base = args.base_url or spec.base_url or ""
     summary = {
         "project": name,
         "title": spec.title,
         "version": spec.version,
+        "base_url": effective_base,
         "operations": len(spec.operations),
         "channels": sorted(channels),
         "out": str(out),
@@ -77,7 +87,6 @@ def main(argv: list = None) -> int:
 
 
 def _slugify(title: str) -> str:
-    from mcpify.utils import to_kebab
     return to_kebab(title) or "app"
 
 

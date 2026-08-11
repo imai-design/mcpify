@@ -8,3 +8,4 @@ output*/
 dist/
 build/
 .pytest_cache/
+SECURITY_AUDIT_*.md

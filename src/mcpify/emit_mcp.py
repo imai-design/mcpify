@@ -2,17 +2,18 @@ from pathlib import Path
 from typing import Optional
 
 from mcpify.openapi import Operation, Spec
-from mcpify.utils import py_literal
+from mcpify.utils import one_line, py_literal
 
 
 def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+    effective_base = base_url or spec.base_url or ""
     server_py = out_dir / "server.py"
     server_py.write_text(_render_server(spec, name, base_url), encoding="utf-8")
     (out_dir / "requirements.txt").write_text(
         "mcp[cli]>=1.0.0\nhttpx>=0.27.0\n", encoding="utf-8"
     )
-    (out_dir / "README.md").write_text(_render_readme(name, base_url), encoding="utf-8")
+    (out_dir / "README.md").write_text(_render_readme(name, effective_base), encoding="utf-8")
     (out_dir / "claude_desktop_config.example.json").write_text(
         _render_claude_config(name, str(server_py.resolve())), encoding="utf-8"
     )
@@ -28,7 +29,7 @@ def _render_server(spec: Spec, name: str, base_url: Optional[str]) -> str:
         "import httpx",
         "from mcp.server.fastmcp import FastMCP",
         "",
-        f'mcp = FastMCP("{name}")',
+        f'mcp = FastMCP({py_literal(name)})',
         "",
         f'BASE_URL = os.environ.get("MCPIFY_BASE_URL", {py_literal(effective_base)})',
         'AUTH_HEADER_NAME = os.environ.get("MCPIFY_AUTH_HEADER", "Authorization")',
@@ -87,7 +88,7 @@ def _render_tool(op: Operation) -> str:
         else:
             args.append(f"{p.py_name}: Optional[{py_t}] = None")
         if p.description:
-            arg_docs.append(f"        {p.py_name}: {p.description}")
+            arg_docs.append(f"        {p.py_name}: {one_line(p.description)}")
     if op.has_body:
         if op.body_required:
             args.insert(sum(1 for p in ordered if p.required), "body: dict")
@@ -96,7 +97,7 @@ def _render_tool(op: Operation) -> str:
         arg_docs.append("        body: JSON request body")
 
     sig = ", ".join(args)
-    desc = (op.summary or op.description or f"{op.method} {op.path}").splitlines()[0].strip()
+    desc = one_line(op.summary or op.description or f"{op.method} {op.path}")
 
     path_params = [p for p in op.params if p.location == "path"]
     query_params = [p for p in op.params if p.location == "query"]

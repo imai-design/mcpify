@@ -2,14 +2,15 @@ from pathlib import Path
 from typing import Optional
 
 from mcpify.openapi import Spec
-from mcpify.utils import py_literal, to_kebab
+from mcpify.utils import one_line, py_literal, to_kebab
 
 
 def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+    effective_base = base_url or spec.base_url or ""
     slug = to_kebab(name)
     (out_dir / f"{slug}.py").write_text(_render(spec, name, base_url), encoding="utf-8")
-    (out_dir / "README.md").write_text(_render_readme(slug, base_url), encoding="utf-8")
+    (out_dir / "README.md").write_text(_render_readme(slug, effective_base), encoding="utf-8")
 
 
 def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
@@ -74,18 +75,18 @@ def _render(spec: Spec, name: str, base_url: Optional[str]) -> str:
     main_parts = [
         "\n",
         "def main():\n",
-        f'    parser = argparse.ArgumentParser(prog="{name}", description="Auto-generated CLI by MCPify.")\n',
+        f'    parser = argparse.ArgumentParser(prog={py_literal(name)}, description="Auto-generated CLI by MCPify.")\n',
         '    sub = parser.add_subparsers(dest="cmd", required=True)\n',
     ]
     handlers: list = []
     for op in spec.operations:
         cmd_name = to_kebab(op.py_name)
-        main_parts.append(f'    p = sub.add_parser({py_literal(cmd_name)}, help={py_literal(op.summary or op.method + " " + op.path)})\n')
+        main_parts.append(f'    p = sub.add_parser({py_literal(cmd_name)}, help={py_literal(one_line(op.summary) or op.method + " " + op.path)})\n')
         for prm in op.params:
             arg_kwargs: list = []
             if not prm.required:
                 arg_kwargs.append("default=None")
-            arg_kwargs.append(f'help={py_literal(prm.description or prm.location)}')
+            arg_kwargs.append(f'help={py_literal(one_line(prm.description) or prm.location)}')
             opt_flag = f'"--{to_kebab(prm.py_name)}"'
             main_parts.append(f'    p.add_argument({opt_flag}, {"required=True, " if prm.required else ""}{", ".join(arg_kwargs)})\n')
         if op.has_body:

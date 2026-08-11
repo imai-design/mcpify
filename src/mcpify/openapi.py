@@ -2,6 +2,7 @@ import ipaddress
 import json
 import os
 import socket
+import sys
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from mcpify.utils import py_identifier, schema_to_py_type
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
 USER_AGENT = os.environ.get("MCPIFY_USER_AGENT", "MCPify/0.1")
+_BAD_PATH_CHARS = "@\\ \t\n\r"
 
 
 @dataclass
@@ -153,6 +155,13 @@ def normalize(raw: dict) -> Spec:
     paths = raw.get("paths") or {}
     for path, path_item in paths.items():
         if not isinstance(path_item, dict):
+            continue
+        if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
+            print(f"warning: skipping path key {path!r} (must start with a single '/')",
+                  file=sys.stderr)
+            continue
+        if any(c in path for c in _BAD_PATH_CHARS):
+            print(f"warning: skipping path key {path!r} (unsafe characters)", file=sys.stderr)
             continue
         path_level_params = path_item.get("parameters") or []
         for method in HTTP_METHODS:

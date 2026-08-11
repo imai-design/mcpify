@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -432,6 +433,221 @@ PARAM_DESCRIPTION_INJECTION = {
         },
     },
 }
+
+
+def test_error_paths_redact_secrets_from_urls(tmp_path):
+    """A 4xx/5xx must not leak MCPIFY_API_KEY into the tool result or stderr.
+
+    resp.raise_for_status() put the full querystring (including ?key=...)
+    into the exception message, which mcp then hands back as the tool's
+    result text. Both generated clients must build the error message
+    through _redact() instead.
+    """
+    out = run_mcpify(tmp_path)
+    server_body = (out / "mcp_server" / "server.py").read_text(encoding="utf-8")
+    assert "raise_for_status" not in server_body
+    assert "def _redact(" in server_body
+    assert "_redact(str(resp.url))" in server_body
+
+    cli_body = (out / "cli" / "smoke.py").read_text(encoding="utf-8")
+    assert "def _redact(" in cli_body
+    assert "_redact(url)" in cli_body
+
+
+def test_request_checks_url_stays_on_base_url(tmp_path):
+    """Generated code must re-validate the final URL at request time.
+
+    The spec/CLI can be redistributed apart from mcpify, so the '@evil.example'
+    style attack (D) needs a runtime guard, not just a generation-time one.
+    """
+    out = run_mcpify(tmp_path)
+    for f in [out / "mcp_server" / "server.py", out / "cli" / "smoke.py"]:
+        body = f.read_text(encoding="utf-8")
+        assert "def _check_url(" in body
+        # defined once, called once inside _request
+        assert body.count("_check_url(") == 2
+
+
+def test_symlinked_output_path_is_refused_not_overwritten(tmp_path):
+    """A pre-existing symlink at an output path must never be followed.
+
+    Attacker-supplied output/* symlinks used to let generation overwrite
+    whatever the link pointed at (e.g. ~/.claude/settings.json).
+    """
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(FIXTURE), encoding="utf-8")
+    victim = tmp_path / "victim.txt"
+    victim.write_text("original content\n", encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "openapi.json").symlink_to(victim)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "smoke"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert victim.read_text(encoding="utf-8") == "original content\n"
+    assert (out / "openapi.json").is_symlink()
+
+
+def test_unresolvable_spec_host_is_fail_closed(tmp_path):
+    """A hostname that cannot be resolved must be blocked, not let through.
+
+    gaierror used to be treated as "let the request fail on its own terms",
+    which let proxy/split-horizon DNS setups reach internal hosts unchecked.
+    """
+    sys.path.insert(0, str(SRC))
+    from mcpify import openapi
+
+    # .invalid is reserved by RFC 2606 to never resolve.
+    try:
+        openapi.load("http://this-host-does-not-exist.invalid/spec.json")
+    except openapi.LocalAddressBlocked:
+        pass
+    else:
+        raise AssertionError("unresolvable spec host was not blocked")
+
+
+def test_refusals_are_reported_as_errors_not_tracebacks(tmp_path):
+    """A guard that stops the run must read as a refusal, not a crash.
+
+    The symlink and size guards raise to abort; if that reaches the user as a
+    raw traceback they cannot tell MCPify protected them from MCPify breaking.
+    Every refusal should look like the argument checks: `ERROR: ...`, exit 2.
+    """
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps(FIXTURE), encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+    victim = tmp_path / "victim.txt"
+    victim.write_text("ORIGINAL", encoding="utf-8")
+    (out / "openapi.json").symlink_to(victim)
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec), "--out", str(out)],
+        capture_output=True, text=True,
+        env={**os.environ, "PYTHONPATH": str(SRC)},
+    )
+    assert proc.returncode == 2, f"expected exit 2, got {proc.returncode}"
+    assert "Traceback" not in proc.stderr, f"refusal leaked a traceback:\n{proc.stderr}"
+    assert proc.stderr.startswith("ERROR:"), proc.stderr
+    assert victim.read_text(encoding="utf-8") == "ORIGINAL"
+
+
+def test_https_handler_can_open_a_connection(tmp_path):
+    """The pinned HTTPS handler must survive this interpreter's HTTPSHandler.
+
+    HTTPSHandler keeps its TLS settings in private attributes that changed
+    shape across versions, so forwarding them blindly broke every https://
+    spec URL with an AttributeError before any connection was attempted.
+    Reaching a refused connection (URLError) proves the plumbing is intact
+    without needing the network.
+    """
+    import urllib.error
+    import urllib.request
+
+    sys.path.insert(0, str(SRC))
+    from mcpify import openapi
+
+    handler = openapi._PinnedHTTPSHandler()
+    req = urllib.request.Request("https://127.0.0.1:1/spec.json")
+    req.timeout = 1  # normally set by OpenerDirector.open(), not by Request()
+    try:
+        handler.https_open(req)
+    except AttributeError as e:
+        raise AssertionError(f"HTTPS handler is broken on this Python: {e}")
+    except (urllib.error.URLError, OSError, openapi.LocalAddressBlocked):
+        pass  # got far enough to actually attempt a connection
+
+
+def test_oversized_spec_is_refused(tmp_path):
+    """MCPIFY_MAX_SPEC_BYTES must cap how much of a spec gets read into memory."""
+    big_spec = json.loads(json.dumps(FIXTURE))
+    big_spec["info"]["description"] = "x" * 5000
+    spec_path = tmp_path / "big.json"
+    spec_path.write_text(json.dumps(big_spec), encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mcpify", str(spec_path),
+         "--out", str(out), "--name", "big"],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin",
+             "MCPIFY_MAX_SPEC_BYTES": "1000"},
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert not out.exists() or not (out / "openapi.json").exists()
+
+
+def test_fifo_spec_path_is_refused(tmp_path):
+    """A FIFO has no fixed size and can hang a read forever; refuse it up front."""
+    if not hasattr(os, "mkfifo"):
+        return  # no FIFOs on this platform
+    fifo_path = tmp_path / "spec.fifo"
+    os.mkfifo(fifo_path)
+    sys.path.insert(0, str(SRC))
+    from mcpify import openapi
+
+    try:
+        openapi.load(str(fifo_path))
+    except RuntimeError as e:
+        assert "regular file" in str(e)
+    else:
+        raise AssertionError("FIFO spec path was not rejected")
+
+
+def test_spec_server_mismatch_is_refused_unless_trusted(tmp_path):
+    """servers[0].url on a different host than the spec must be refused by default.
+
+    That host is where MCPIFY_AUTH_TOKEN / MCPIFY_API_KEY get sent, and the
+    spec's author -- not the caller -- picks it.
+    """
+    import http.server
+    import threading
+
+    body = json.dumps({
+        "openapi": "3.0.0",
+        "info": {"title": "Mismatch API", "version": "1.0.0"},
+        "servers": [{"url": "https://attacker.example"}],
+        "paths": {"/x": {"get": {"operationId": "listX", "summary": "List x"}}},
+    }).encode("utf-8")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        target = f"http://127.0.0.1:{server.server_port}/spec.json"
+        env = {"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"}
+
+        refused = subprocess.run(
+            [sys.executable, "-m", "mcpify", target, "--out", str(tmp_path / "out"),
+             "--name", "mismatch", "--allow-local"],
+            env=env, capture_output=True, text=True,
+        )
+        assert refused.returncode != 0
+        assert "trust-spec-server" in refused.stderr
+
+        trusted = subprocess.run(
+            [sys.executable, "-m", "mcpify", target, "--out", str(tmp_path / "out2"),
+             "--name", "mismatch", "--allow-local", "--trust-spec-server"],
+            env=env, capture_output=True, text=True,
+        )
+        assert trusted.returncode == 0, trusted.stderr
+    finally:
+        server.shutdown()
 
 
 def test_tool_param_docstring_cannot_open_heading(tmp_path):

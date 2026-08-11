@@ -1,5 +1,7 @@
 import json
+import os
 import re
+from pathlib import Path
 
 _NON_ALNUM = re.compile(r"[^a-zA-Z0-9]+")
 _MD_CONTROL = re.compile(r"[\r\x00-\x08\x0b\x0c\x1b\u200b-\u200f\u2028\u2029]")
@@ -72,3 +74,25 @@ def schema_to_py_type(schema: dict) -> str:
     if "$ref" in schema or "oneOf" in schema or "anyOf" in schema:
         return "dict"
     return "str"
+
+
+def write_generated(path: Path, text: str, root: Path, mode: int = 0o644) -> None:
+    """生成物を書き出す。既存のシンボリックリンクは絶対に追跡しない。
+
+    --out の外にあるファイルを書き換えられないよう、書き込み先の親ディレクトリが
+    root 配下に収まっているかも検証する（root 自体が既にシンボリックリンクの場合、
+    その先へ書いてしまわないよう root 側は呼び出し側で is_symlink() を確認すること）。
+    """
+    root = Path(root).resolve()
+    resolved_parent = path.parent.resolve()
+    if resolved_parent != root and root not in resolved_parent.parents:
+        raise RuntimeError(f"refusing to write outside --out: {path}")
+    if path.is_symlink():
+        raise RuntimeError(
+            f"{path} is a symlink; refusing to write through it and "
+            f"overwrite whatever it points at."
+        )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, mode)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)

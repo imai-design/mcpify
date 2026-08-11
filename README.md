@@ -63,14 +63,16 @@ listed in its own `requirements.txt`.
 
 ```
 mcpify TARGET [--out PATH] [--name NAME] [--base-url URL] [--only CHANNEL]
-              [--allow-local]
+              [--allow-local] [--trust-spec-server]
 
-  TARGET         OpenAPI document. URL (http/https) or local path (json/yaml).
-  --out, -o      Output directory (default: ./output)
-  --name, -n     Project slug (default: derived from OpenAPI title)
-  --base-url     Override servers[0].url in generated code
-  --only         One of: openapi | mcp | skill | cli | all (default: all)
-  --allow-local  Permit spec URLs on local/private networks (see below)
+  TARGET               OpenAPI document. URL (http/https) or local path (json/yaml).
+  --out, -o            Output directory (default: ./output)
+  --name, -n           Project slug (default: derived from OpenAPI title)
+  --base-url           Override servers[0].url in generated code
+  --only               One of: openapi | mcp | skill | cli | all (default: all)
+  --allow-local        Permit spec URLs on local/private networks (see below)
+  --trust-spec-server  Trust servers[0].url even when its host differs from
+                        the spec's own host (see "A note on untrusted specs")
 ```
 
 ### Examples
@@ -169,6 +171,14 @@ thing to do, so pass `--allow-local` for that:
 ```bash
 mcpify http://localhost:8000/openapi.json --allow-local --name myapp
 ```
+
+The spec's `servers[0].url` is picked by whoever wrote the spec, not by you —
+and it is where the generated code sends `MCPIFY_AUTH_TOKEN` /
+`MCPIFY_API_KEY`. If that host differs from the host the spec itself was
+served from, MCPify refuses to generate by default (re-run with `--base-url`
+to point at the host you actually trust, or `--trust-spec-server` if the
+mismatch is intentional). **Never run a spec from someone you don't know
+without `--base-url` pointed at the API you mean to use.**
 
 ## Development
 

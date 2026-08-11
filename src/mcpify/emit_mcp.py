@@ -2,20 +2,27 @@ from pathlib import Path
 from typing import Optional
 
 from mcpify.openapi import Operation, Spec
-from mcpify.utils import one_line, py_literal
+from mcpify.utils import one_line, py_literal, write_generated
 
 
-def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str]) -> None:
+def emit(spec: Spec, out_dir: Path, name: str, base_url: Optional[str], root: Path) -> None:
+    if out_dir.is_symlink():
+        raise RuntimeError(
+            f"{out_dir} is a symlink; refusing to write generated files through it."
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     effective_base = base_url or spec.base_url or ""
     server_py = out_dir / "server.py"
-    server_py.write_text(_render_server(spec, name, base_url), encoding="utf-8")
-    (out_dir / "requirements.txt").write_text(
-        "mcp[cli]>=1.0.0\nhttpx>=0.27.0\n", encoding="utf-8"
+    write_generated(server_py, _render_server(spec, name, base_url), root)
+    write_generated(
+        out_dir / "requirements.txt", "mcp[cli]>=1.0.0,<2\nhttpx>=0.27.0\n", root
     )
-    (out_dir / "README.md").write_text(_render_readme(name, effective_base), encoding="utf-8")
-    (out_dir / "claude_desktop_config.example.json").write_text(
-        _render_claude_config(name, str(server_py.resolve())), encoding="utf-8"
+    write_generated(out_dir / "README.md", _render_readme(name, effective_base), root)
+    write_generated(
+        out_dir / "claude_desktop_config.example.json",
+        _render_claude_config(name, str(server_py.resolve())),
+        root,
+        mode=0o600,
     )
 
 
@@ -24,6 +31,7 @@ def _render_server(spec: Spec, name: str, base_url: Optional[str]) -> str:
     lines = [
         '"""Auto-generated MCP server by MCPify (https://github.com/imai-design/mcpify)."""',
         "import os",
+        "import urllib.parse",
         "from typing import Any, Optional",
         "",
         "import httpx",
@@ -38,6 +46,29 @@ def _render_server(spec: Spec, name: str, base_url: Optional[str]) -> str:
         'API_KEY = os.environ.get("MCPIFY_API_KEY", "")',
         'API_KEY_PARAM = os.environ.get("MCPIFY_API_KEY_PARAM", "key")',
         "",
+        "_BASE = urllib.parse.urlsplit(BASE_URL)",
+        "",
+        'if (AUTH_TOKEN or API_KEY) and not BASE_URL.startswith("https://"):',
+        '    raise SystemExit("refusing to send credentials to a non-HTTPS BASE_URL: " + BASE_URL)',
+        "",
+        "_SECRET_PARAMS = {'key', 'api_key', 'apikey', 'token', 'access_token'}",
+        "",
+        "",
+        "def _redact(u: str) -> str:",
+        "    parts = urllib.parse.urlsplit(u)",
+        "    if not parts.query:",
+        "        return u",
+        "    pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)",
+        "    safe = [(k, '***' if (k.lower() in _SECRET_PARAMS or (API_KEY and v == API_KEY)) else v)",
+        "            for k, v in pairs]",
+        "    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(safe)))",
+        "",
+        "",
+        "def _check_url(u: str) -> None:",
+        "    p = urllib.parse.urlsplit(u)",
+        "    if p.username or (p.scheme, p.hostname, p.port) != (_BASE.scheme, _BASE.hostname, _BASE.port):",
+        "        raise RuntimeError('refusing to leave the configured base URL: ' + u)",
+        "",
         "",
         "def _headers() -> dict:",
         '    h: dict = {"Accept": "application/json", "User-Agent": USER_AGENT}',
@@ -51,6 +82,7 @@ def _render_server(spec: Spec, name: str, base_url: Optional[str]) -> str:
         "    if path_params:",
         "        for k, v in path_params.items():",
         "            url = url.replace('{' + k + '}', str(v))",
+        "    _check_url(url)",
         "    h = _headers()",
         "    if headers:",
         "        h.update({k: str(v) for k, v in headers.items() if v is not None})",
@@ -59,7 +91,8 @@ def _render_server(spec: Spec, name: str, base_url: Optional[str]) -> str:
         "        q = {**q, API_KEY_PARAM: API_KEY}",
         "    with httpx.Client(timeout=60.0) as client:",
         "        resp = client.request(method, url, params=q, headers=h, json=body)",
-        "    resp.raise_for_status()",
+        "    if resp.is_error:",
+        "        raise RuntimeError(f'HTTP {resp.status_code} {resp.reason_phrase} for {method} {_redact(str(resp.url))}')",
         "    if not resp.content:",
         "        return {'status_code': resp.status_code}",
         "    ctype = resp.headers.get('content-type', '')",
@@ -136,7 +169,7 @@ pip install -r requirements.txt
 
 ```bash
 export MCPIFY_BASE_URL="{base_url or 'https://your-api.example.com'}"
-export MCPIFY_AUTH_TOKEN="your-token-here"
+read -rs MCPIFY_AUTH_TOKEN; export MCPIFY_AUTH_TOKEN
 python server.py
 ```
 

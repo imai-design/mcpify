@@ -1,17 +1,25 @@
 from pathlib import Path
 
 from mcpify.openapi import Spec
-from mcpify.utils import to_kebab, one_line, yaml_scalar
+from mcpify.utils import to_kebab, one_line, write_generated, yaml_scalar
 
 DESCRIPTION_MAX = 900  # Claude Code の frontmatter description 上限に収める
 
 
-def emit(spec: Spec, out_dir: Path, name: str) -> None:
+def emit(spec: Spec, out_dir: Path, name: str, root: Path) -> None:
+    if out_dir.is_symlink():
+        raise RuntimeError(
+            f"{out_dir} is a symlink; refusing to write generated files through it."
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     slug = to_kebab(name)
     skill_dir = out_dir / slug
+    if skill_dir.is_symlink():
+        raise RuntimeError(
+            f"{skill_dir} is a symlink; refusing to write generated files through it."
+        )
     skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text(_render(spec, name, slug), encoding="utf-8")
+    write_generated(skill_dir / "SKILL.md", _render(spec, name, slug), root)
 
 
 def _render(spec: Spec, name: str, slug: str) -> str:
